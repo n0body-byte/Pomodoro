@@ -34,7 +34,6 @@ struct Index {
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
   private breakDuration: number = DEFAULT_BREAK_SECONDS;
-  private autoStart: boolean = false;
   private tickCount: number = 0;
   private tabsController: TabsController = new TabsController();
 
@@ -69,12 +68,10 @@ struct Index {
     try {
       this.workDuration = await PreferencesHelper.loadWorkDuration(this.getContext());
       this.breakDuration = await PreferencesHelper.loadBreakDuration(this.getContext());
-      this.autoStart = await PreferencesHelper.loadAutoStart(this.getContext());
       this.dailyTarget = await PreferencesHelper.loadDailyTarget(this.getContext());
     } catch {
       this.workDuration = DEFAULT_WORK_SECONDS;
       this.breakDuration = DEFAULT_BREAK_SECONDS;
-      this.autoStart = false;
       this.dailyTarget = DEFAULT_DAILY_TARGET;
     }
   }
@@ -148,11 +145,9 @@ struct Index {
       this.switchToWork();
     }
 
-    if (this.autoStart) {
-      setTimeout(() => {
-        this.startTimer();
-      }, 2000);
-    }
+    setTimeout(() => {
+      this.startTimer();
+    }, 2000);
   }
 
   private getTodayStr(): string {
@@ -222,6 +217,9 @@ struct Index {
     this.recordBreakSession();
     this.stopTimer();
     this.switchToWork();
+    setTimeout(() => {
+      this.startTimer();
+    }, 2000);
   }
 
   onSkipPhase(): void {
@@ -241,6 +239,9 @@ struct Index {
     this.recordSession();
     this.sendNotification(true);
     this.switchToBreak();
+    setTimeout(() => {
+      this.startTimer();
+    }, 2000);
   }
 
   sendNotification(isWorkEnd: boolean): void {

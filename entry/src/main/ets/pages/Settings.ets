@@ -5,7 +5,6 @@ import { DEFAULT_WORK_SECONDS, DEFAULT_BREAK_SECONDS, DEFAULT_DAILY_TARGET } fro
 export struct Settings {
   @State workMinutes: number = 25;
   @State breakMinutes: number = 5;
-  @State autoStart: boolean = false;
   @State dailyTarget: number = DEFAULT_DAILY_TARGET;
   onSaved?: () => void;
 
@@ -14,16 +13,13 @@ export struct Settings {
       const ctx = this.getUIContext().getHostContext()!;
       const workSeconds = await PreferencesHelper.loadWorkDuration(ctx);
       const breakSeconds = await PreferencesHelper.loadBreakDuration(ctx);
-      const autoStartVal = await PreferencesHelper.loadAutoStart(ctx);
       const targetVal = await PreferencesHelper.loadDailyTarget(ctx);
       this.workMinutes = Math.floor(workSeconds / 60);
       this.breakMinutes = Math.floor(breakSeconds / 60);
-      this.autoStart = autoStartVal;
       this.dailyTarget = targetVal;
     } catch {
       this.workMinutes = Math.floor(DEFAULT_WORK_SECONDS / 60);
       this.breakMinutes = Math.floor(DEFAULT_BREAK_SECONDS / 60);
-      this.autoStart = false;
       this.dailyTarget = DEFAULT_DAILY_TARGET;
     }
   }
@@ -68,11 +64,9 @@ export struct Settings {
     const ctx = this.getUIContext().getHostContext()!;
     const workSeconds = this.workMinutes * 60;
     const breakSeconds = this.breakMinutes * 60;
-    const autoStartVal = this.autoStart;
     const targetVal = this.dailyTarget;
     PreferencesHelper.saveWorkDuration(ctx, workSeconds)
       .then(() => PreferencesHelper.saveBreakDuration(ctx, breakSeconds))
-      .then(() => PreferencesHelper.saveAutoStart(ctx, autoStartVal))
       .then(() => PreferencesHelper.saveDailyTarget(ctx, targetVal))
       .then(() => {
         if (this.onSaved) {
@@ -168,24 +162,6 @@ export struct Settings {
               .fontSize($r('app.float.label_font_size'))
               .fontColor($r('app.color.text_tertiary'))
           }
-        }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-
-        Divider()
-          .color($r('app.color.divider'))
-          .margin({ left: 16, right: 16 })
-
-        Row() {
-          Text($r('app.string.auto_start_label'))
-            .fontSize($r('app.float.button_font_size'))
-            .fontColor($r('app.color.text_primary'))
-          Blank()
-          Toggle({ type: ToggleType.Switch, isOn: this.autoStart })
-            .selectedColor($r('app.color.primary_red'))
-            .onChange((value: boolean) => {
-              this.autoStart = value;
-            })
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 14, bottom: 14 })
