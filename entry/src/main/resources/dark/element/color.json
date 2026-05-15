@@ -1,0 +1,68 @@
+{
+  "color": [
+    {
+      "name": "start_window_background",
+      "value": "#121212"
+    },
+    {
+      "name": "primary_red",
+      "value": "#FF6B6B"
+    },
+    {
+      "name": "primary_green",
+      "value": "#2ECC71"
+    },
+    {
+      "name": "background",
+      "value": "#121212"
+    },
+    {
+      "name": "surface",
+      "value": "#1E1E1E"
+    },
+    {
+      "name": "ring_track",
+      "value": "#2A2A2A"
+    },
+    {
+      "name": "text_primary",
+      "value": "#E8E8E8"
+    },
+    {
+      "name": "text_secondary",
+      "value": "#9E9E9E"
+    },
+    {
+      "name": "text_tertiary",
+      "value": "#6E6E6E"
+    },
+    {
+      "name": "button_reset",
+      "value": "#3A3A3A"
+    },
+    {
+      "name": "background_white",
+      "value": "#121212"
+    },
+    {
+      "name": "background_light",
+      "value": "#1A1A1A"
+    },
+    {
+      "name": "button_primary",
+      "value": "#FF6B6B"
+    },
+    {
+      "name": "shadow",
+      "value": "#1A000000"
+    },
+    {
+      "name": "divider",
+      "value": "#2A2A2A"
+    },
+    {
+      "name": "accent_yellow",
+      "value": "#F1C40F"
+    }
+  ]
+}

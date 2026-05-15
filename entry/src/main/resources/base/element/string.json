@@ -1,0 +1,148 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "label"
+    },
+    {
+      "name": "app_name",
+      "value": "番茄钟"
+    },
+    {
+      "name": "timer_title",
+      "value": "番茄钟"
+    },
+    {
+      "name": "mode_work",
+      "value": "工作中"
+    },
+    {
+      "name": "mode_break",
+      "value": "休息中"
+    },
+    {
+      "name": "btn_start",
+      "value": "开始"
+    },
+    {
+      "name": "btn_pause",
+      "value": "暂停"
+    },
+    {
+      "name": "btn_reset",
+      "value": "重置"
+    },
+    {
+      "name": "btn_settings",
+      "value": "设置"
+    },
+    {
+      "name": "btn_save",
+      "value": "保存并返回"
+    },
+    {
+      "name": "btn_skip",
+      "value": "跳过休息"
+    },
+    {
+      "name": "btn_extend",
+      "value": "延长5分钟"
+    },
+    {
+      "name": "btn_end_early",
+      "value": "提前结束"
+    },
+    {
+      "name": "btn_statistics",
+      "value": "统计"
+    },
+    {
+      "name": "btn_skip_break",
+      "value": "跳过"
+    },
+    {
+      "name": "session_count",
+      "value": "已完成: %d 个番茄"
+    },
+    {
+      "name": "today_progress",
+      "value": "今日: %d/%d"
+    },
+    {
+      "name": "settings_title",
+      "value": "设置"
+    },
+    {
+      "name": "work_duration_label",
+      "value": "工作时长"
+    },
+    {
+      "name": "break_duration_label",
+      "value": "休息时长"
+    },
+    {
+      "name": "auto_start_label",
+      "value": "休息结束自动开始工作"
+    },
+    {
+      "name": "daily_target_label",
+      "value": "每日目标"
+    },
+    {
+      "name": "daily_target_unit",
+      "value": "个番茄"
+    },
+    {
+      "name": "minutes_unit",
+      "value": "分钟"
+    },
+    {
+      "name": "notification_work_end_title",
+      "value": "番茄钟"
+    },
+    {
+      "name": "notification_work_end_text",
+      "value": "工作时间结束，休息一下吧！"
+    },
+    {
+      "name": "notification_break_end_title",
+      "value": "番茄钟"
+    },
+    {
+      "name": "notification_break_end_text",
+      "value": "休息时间结束，开始工作吧！"
+    },
+    {
+      "name": "notification_ongoing_title",
+      "value": "番茄钟计时中"
+    },
+    {
+      "name": "statistics_title",
+      "value": "番茄统计"
+    },
+    {
+      "name": "tab_daily",
+      "value": "日"
+    },
+    {
+      "name": "tab_weekly",
+      "value": "周"
+    },
+    {
+      "name": "tab_monthly",
+      "value": "月"
+    },
+    {
+      "name": "stats_total",
+      "value": "总计: %d 个番茄"
+    }
+  ]
+}

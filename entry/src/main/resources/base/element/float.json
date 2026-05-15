@@ -1,0 +1,56 @@
+{
+  "float": [
+    {
+      "name": "page_text_font_size",
+      "value": "50fp"
+    },
+    {
+      "name": "timer_font_size",
+      "value": "64fp"
+    },
+    {
+      "name": "title_font_size",
+      "value": "22fp"
+    },
+    {
+      "name": "label_font_size",
+      "value": "15fp"
+    },
+    {
+      "name": "button_font_size",
+      "value": "17fp"
+    },
+    {
+      "name": "session_count_font_size",
+      "value": "14fp"
+    },
+    {
+      "name": "caption_font_size",
+      "value": "13fp"
+    },
+    {
+      "name": "ring_stroke_width",
+      "value": "14fp"
+    },
+    {
+      "name": "spacing_xs",
+      "value": "8fp"
+    },
+    {
+      "name": "spacing_sm",
+      "value": "12fp"
+    },
+    {
+      "name": "spacing_md",
+      "value": "16fp"
+    },
+    {
+      "name": "spacing_lg",
+      "value": "24fp"
+    },
+    {
+      "name": "spacing_xl",
+      "value": "32fp"
+    }
+  ]
+}
