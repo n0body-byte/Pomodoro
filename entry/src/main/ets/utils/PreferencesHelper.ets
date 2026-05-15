@@ -16,6 +16,7 @@ export interface SessionRecord {
   date: string;
   workSeconds: number;
   completedAt: number;
+  type?: 'work' | 'break';
 }
 
 export interface TimerState {
@@ -140,7 +141,33 @@ export class PreferencesHelper {
     const history = await PreferencesHelper.loadSessionHistory(context);
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
-    return history.filter((r: SessionRecord) => r.date === todayStr).length;
+    return history.filter((r: SessionRecord) => r.date === todayStr && r.type !== 'break').length;
+  }
+
+  static async getTodayWorkSeconds(context: Context): Promise<number> {
+    const history = await PreferencesHelper.loadSessionHistory(context);
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
+    let total = 0;
+    for (const r of history) {
+      if (r.date === todayStr && r.type !== 'break') {
+        total += r.workSeconds;
+      }
+    }
+    return total;
+  }
+
+  static async getTodayBreakSeconds(context: Context): Promise<number> {
+    const history = await PreferencesHelper.loadSessionHistory(context);
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
+    let total = 0;
+    for (const r of history) {
+      if (r.date === todayStr && r.type === 'break') {
+        total += r.workSeconds;
+      }
+    }
+    return total;
   }
 
   static async getStats(context: Context, days: number): Promise<DailyStats[]> {

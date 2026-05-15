@@ -9,7 +9,6 @@ import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET,
-  EXTEND_SECONDS,
   VIBRATION_DURATION_MS,
   NOTIFICATION_WORK_END_ID,
   NOTIFICATION_BREAK_END_ID,
@@ -27,6 +26,8 @@ struct Index {
   @State completedSessions: number = 0;
   @State progressValue: number = 100;
   @State todayCount: number = 0;
+  @State todayWorkSeconds: number = 0;
+  @State todayBreakSeconds: number = 0;
   @State dailyTarget: number = DEFAULT_DAILY_TARGET;
   @State currentTabIndex: number = 0;
 
@@ -81,8 +82,12 @@ struct Index {
   async loadTodayStats(): Promise<void> {
     try {
       this.todayCount = await PreferencesHelper.getTodaySessions(this.getContext());
+      this.todayWorkSeconds = await PreferencesHelper.getTodayWorkSeconds(this.getContext());
+      this.todayBreakSeconds = await PreferencesHelper.getTodayBreakSeconds(this.getContext());
     } catch {
       this.todayCount = 0;
+      this.todayWorkSeconds = 0;
+      this.todayBreakSeconds = 0;
     }
   }
 
@@ -138,6 +143,7 @@ struct Index {
       this.sendNotification(true);
       this.switchToBreak();
     } else {
+      this.recordBreakSession();
       this.sendNotification(false);
       this.switchToWork();
     }
@@ -149,19 +155,37 @@ struct Index {
     }
   }
 
-  recordSession(): void {
+  private getTodayStr(): string {
     const today = new Date();
-    const dateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
+    return `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
+  }
+
+  recordSession(): void {
     PreferencesHelper.saveSessionRecord(this.getContext(), {
-      date: dateStr,
+      date: this.getTodayStr(),
       workSeconds: this.totalSeconds - this.remainingSeconds,
-      completedAt: Date.now()
+      completedAt: Date.now(),
+      type: 'work'
     }).then(() => this.loadTodayStats());
+  }
+
+  recordBreakSession(): void {
+    const breakSeconds = this.totalSeconds - this.remainingSeconds;
+    if (breakSeconds > 0) {
+      PreferencesHelper.saveSessionRecord(this.getContext(), {
+        date: this.getTodayStr(),
+        workSeconds: breakSeconds,
+        completedAt: Date.now(),
+        type: 'break'
+      }).then(() => this.loadTodayStats());
+    }
   }
 
   clearTodayData(): void {
     PreferencesHelper.clearTodaySessions(this.getContext()).then(() => {
       this.todayCount = 0;
+      this.todayWorkSeconds = 0;
+      this.todayBreakSeconds = 0;
       this.completedSessions = 0;
     });
   }
@@ -195,14 +219,20 @@ struct Index {
   }
 
   onSkipBreak(): void {
+    this.recordBreakSession();
     this.stopTimer();
     this.switchToWork();
   }
 
-  onExtend(): void {
-    this.totalSeconds += EXTEND_SECONDS;
-    this.remainingSeconds += EXTEND_SECONDS;
-    this.updateProgress();
+  onSkipPhase(): void {
+    if (!this.isRunning) {
+      return;
+    }
+    if (this.isWorkMode) {
+      this.onEndEarly();
+    } else {
+      this.onSkipBreak();
+    }
   }
 
   onEndEarly(): void {
@@ -309,6 +339,18 @@ struct Index {
     this.updateProgress();
   }
 
+  private formatDuration(totalSeconds: number): string {
+    if (totalSeconds <= 0) {
+      return '0m';
+    }
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    if (hours > 0) {
+      return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+    }
+    return `${minutes}m`;
+  }
+
   private getCapsuleIndices(): number[] {
     const arr: number[] = [];
     for (let i = 0; i < this.dailyTarget; i++) {
@@ -319,7 +361,8 @@ struct Index {
 
   private async onNavigateToTimer(): Promise<void> {
     await this.loadSettings();
-    if (!this.isRunning) {
+    // 仅在初始状态（未曾开始或刚完成复位）时应用新设置，暂停中的计时不受影响
+    if (!this.isRunning && this.remainingSeconds === this.totalSeconds) {
       this.totalSeconds = this.isWorkMode ? this.workDuration : this.breakDuration;
       this.remainingSeconds = this.totalSeconds;
       this.updateProgress();
@@ -441,61 +484,65 @@ struct Index {
           isWorkMode: this.isWorkMode
         })
 
-        if (this.isRunning) {
-          Row({ space: 8 }) {
-            if (!this.isWorkMode) {
-              Button() {
-                Text($r('app.string.btn_skip_break'))
-                  .fontSize(11)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#FA2E69')
-              }
-                .height(32)
-                .backgroundColor('#1AFA2E69')
-                .borderRadius(16)
-                .onClick(() => this.onSkipBreak())
-            }
-
-            Button() {
-              Text($r('app.string.btn_extend'))
-                .fontSize(11)
-                .fontWeight(FontWeight.Medium)
-                .fontColor('#65FE08')
-            }
-              .height(32)
-              .backgroundColor('#1A65FE08')
-              .borderRadius(16)
-              .onClick(() => this.onExtend())
-
-            if (this.isWorkMode) {
-              Button() {
-                Text($r('app.string.btn_end_early'))
-                  .fontSize(11)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#8E8E93')
-              }
-                .height(32)
-                .backgroundColor('#2C2C2E')
-                .borderRadius(16)
-                .onClick(() => this.onEndEarly())
-            }
-          }
-          .justifyContent(FlexAlign.Center)
-          .margin({ top: 20 })
-          .animation({ duration: 200, curve: Curve.EaseInOut })
-        }
-
         TimerControls({
           isRunning: this.isRunning,
           isWorkMode: this.isWorkMode,
           onStartPause: () => this.onStartPause(),
-          onReset: () => this.onReset()
+          onReset: () => this.onReset(),
+          onSkip: () => this.onSkipPhase()
         })
           .margin({ top: 28 })
       }
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
+
+    // 今日专注 / 休息时长卡片
+    Row({ space: 8 }) {
+      Column({ space: 6 }) {
+        Row({ space: 4 }) {
+          Text('⏱')
+            .fontSize(12)
+          Text('专注')
+            .fontSize(10)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#8E8E93')
+        }
+        Text(this.formatDuration(this.todayWorkSeconds))
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#FFFFFF')
+      }
+      .layoutWeight(1)
+      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+      .backgroundColor('#1C1C1E')
+      .borderRadius(14)
+      .border({ width: 1, color: '#1FFFFFFF' })
+      .alignItems(HorizontalAlign.Start)
+
+      Column({ space: 6 }) {
+        Row({ space: 4 }) {
+          Text('☕')
+            .fontSize(12)
+          Text('休息')
+            .fontSize(10)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#8E8E93')
+        }
+        Text(this.formatDuration(this.todayBreakSeconds))
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#FFFFFF')
+      }
+      .layoutWeight(1)
+      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+      .backgroundColor('#1C1C1E')
+      .borderRadius(14)
+      .border({ width: 1, color: '#1FFFFFFF' })
+      .alignItems(HorizontalAlign.Start)
     }
+    .width('100%')
+    .margin({ bottom: 8 })
+  }
     .width('100%')
     .height('100%')
     .padding({ left: 20, right: 20, top: 48 })

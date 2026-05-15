@@ -4,12 +4,35 @@ export struct TimerControls {
   @Prop isWorkMode: boolean = true;
   onStartPause: () => void = () => {};
   onReset: () => void = () => {};
+  onSkip: () => void = () => {};
   @State private mainPressed: boolean = false;
   @State private resetPressed: boolean = false;
+  @State private skipPressed: boolean = false;
 
   build() {
-    Column({ space: 24 }) {
-      // 主控按钮 — 大圆形
+    Row({ space: 16 }) {
+      // 重置
+      Button() {
+        Text('↺')
+          .fontSize(18)
+          .fontColor('#8E8E93')
+      }
+        .width(44)
+        .height(44)
+        .backgroundColor('#2C2C2E')
+        .borderRadius(22)
+        .scale({ x: this.resetPressed ? 0.9 : 1, y: this.resetPressed ? 0.9 : 1 })
+        .animation({ duration: 150, curve: Curve.EaseOut })
+        .onTouch((event: TouchEvent) => {
+          if (event.type === TouchType.Down) {
+            this.resetPressed = true;
+          } else if (event.type === TouchType.Up) {
+            this.resetPressed = false;
+            this.onReset();
+          }
+        })
+
+      // 开始/暂停
       Button() {
         Text(this.isRunning ? '⏸' : '▶')
           .fontSize(32)
@@ -31,9 +54,9 @@ export struct TimerControls {
           }
         })
 
-      // 重置按钮 — 小圆形深灰
+      // 跳过/提前结束
       Button() {
-        Text('↺')
+        Text('→')
           .fontSize(18)
           .fontColor('#8E8E93')
       }
@@ -41,17 +64,17 @@ export struct TimerControls {
         .height(44)
         .backgroundColor('#2C2C2E')
         .borderRadius(22)
-        .scale({ x: this.resetPressed ? 0.9 : 1, y: this.resetPressed ? 0.9 : 1 })
+        .scale({ x: this.skipPressed ? 0.9 : 1, y: this.skipPressed ? 0.9 : 1 })
         .animation({ duration: 150, curve: Curve.EaseOut })
         .onTouch((event: TouchEvent) => {
           if (event.type === TouchType.Down) {
-            this.resetPressed = true;
+            this.skipPressed = true;
           } else if (event.type === TouchType.Up) {
-            this.resetPressed = false;
-            this.onReset();
+            this.skipPressed = false;
+            this.onSkip();
           }
         })
     }
-    .alignItems(HorizontalAlign.Center)
+    .justifyContent(FlexAlign.Center)
   }
 }
