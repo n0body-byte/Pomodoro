@@ -5,14 +5,17 @@ export struct CircularProgress {
   @Prop totalSeconds: number = 1;
   @Prop isWorkMode: boolean = true;
 
-  formatTime(totalSeconds: number): string {
-    const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
-    const seconds = (totalSeconds % 60).toString().padStart(2, '0');
-    return `${minutes}:${seconds}`;
+  private formatMinutes(): string {
+    return Math.floor(this.remainingSeconds / 60).toString().padStart(2, '0');
+  }
+
+  private formatSeconds(): string {
+    return (this.remainingSeconds % 60).toString().padStart(2, '0');
   }
 
   build() {
     Stack({ alignContent: Alignment.Center }) {
+      // 轨道环 — 同色系 15% 透明度
       Progress({
         value: 100,
         total: 100,
@@ -20,9 +23,11 @@ export struct CircularProgress {
       })
         .width(280)
         .height(280)
-        .color($r('app.color.ring_track'))
+        .color(this.isWorkMode ? '#FA2E69' : '#65FE08')
+        .opacity(0.15)
         .style({ strokeWidth: $r('app.float.ring_stroke_width'), scaleCount: 1, scaleWidth: 0 })
 
+      // 前景进度环 — 弹簧动画
       Progress({
         value: this.progress,
         total: 100,
@@ -30,31 +35,42 @@ export struct CircularProgress {
       })
         .width(280)
         .height(280)
-        .color(this.isWorkMode ? $r('app.color.primary_red') : $r('app.color.primary_green'))
+        .color(this.isWorkMode ? '#FA2E69' : '#65FE08')
         .style({ strokeWidth: $r('app.float.ring_stroke_width'), scaleCount: 1, scaleWidth: 0 })
-        .animation({ duration: 1000, curve: Curve.EaseInOut })
+        .animation({ duration: 1200, curve: Curve.EaseOut })
 
-      Column({ space: 2 }) {
-        Text('剩余时间')
-          .fontSize($r('app.float.caption_font_size'))
-          .fontColor($r('app.color.text_tertiary'))
-          .letterSpacing(2)
-          .margin({ bottom: 4 })
+      // 居中时间 — 等宽数字 + 冒号 30% 透明度
+      Column({ space: 0 }) {
+        Row({ space: 0 }) {
+          Text(this.formatMinutes())
+            .fontSize(68)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+            .fontFamily('monospace')
+            .letterSpacing(-2)
 
-        Text(this.formatTime(this.remainingSeconds))
-          .fontSize($r('app.float.timer_font_size'))
+          Text(':')
+            .fontSize(68)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+            .fontFamily('monospace')
+            .opacity(0.3)
+            .letterSpacing(-2)
+
+          Text(this.formatSeconds())
+            .fontSize(68)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+            .fontFamily('monospace')
+            .letterSpacing(-2)
+        }
+
+        Text(this.isWorkMode ? '专注' : '休息')
+          .fontSize(11)
+          .fontColor(this.isWorkMode ? '#FA2E69' : '#65FE08')
           .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-          .fontFamily('monospace')
-
-        Text(this.isWorkMode ? '工作中' : '休息中')
-          .fontSize($r('app.float.label_font_size'))
-          .fontColor(this.isWorkMode ? $r('app.color.primary_red') : $r('app.color.primary_green'))
-          .fontWeight(FontWeight.Medium)
-          .margin({ top: 6 })
-          .padding({ left: 16, right: 16, top: 4, bottom: 4 })
-          .borderRadius(10)
-          .backgroundColor(this.isWorkMode ? '#FFF0F0' : '#F0FFF4')
+          .letterSpacing(4)
+          .margin({ top: 2 })
       }
     }
     .padding(8)

@@ -1,7 +1,5 @@
 {
   "src": [
-    "pages/Index",
-    "pages/Settings",
-    "pages/Statistics"
+    "pages/Index"
   ]
 }

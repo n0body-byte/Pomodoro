@@ -2,67 +2,67 @@
   "color": [
     {
       "name": "start_window_background",
-      "value": "#121212"
+      "value": "#000000"
     },
     {
       "name": "primary_red",
-      "value": "#FF6B6B"
+      "value": "#FF3B69"
     },
     {
       "name": "primary_green",
-      "value": "#2ECC71"
+      "value": "#6AFE10"
     },
     {
       "name": "background",
-      "value": "#121212"
+      "value": "#000000"
     },
     {
       "name": "surface",
-      "value": "#1E1E1E"
+      "value": "#1C1C1E"
     },
     {
       "name": "ring_track",
-      "value": "#2A2A2A"
+      "value": "#2C2C2E"
     },
     {
       "name": "text_primary",
-      "value": "#E8E8E8"
+      "value": "#FFFFFF"
     },
     {
       "name": "text_secondary",
-      "value": "#9E9E9E"
+      "value": "#8E8E93"
     },
     {
       "name": "text_tertiary",
-      "value": "#6E6E6E"
+      "value": "#636366"
     },
     {
       "name": "button_reset",
-      "value": "#3A3A3A"
+      "value": "#2C2C2E"
     },
     {
       "name": "background_white",
-      "value": "#121212"
+      "value": "#000000"
     },
     {
       "name": "background_light",
-      "value": "#1A1A1A"
+      "value": "#1C1C1E"
     },
     {
       "name": "button_primary",
-      "value": "#FF6B6B"
+      "value": "#FF3B69"
     },
     {
       "name": "shadow",
-      "value": "#1A000000"
+      "value": "#00000000"
     },
     {
       "name": "divider",
-      "value": "#2A2A2A"
+      "value": "#38383A"
     },
     {
       "name": "accent_yellow",
-      "value": "#F1C40F"
+      "value": "#F6DE03"
     }
   ]
 }

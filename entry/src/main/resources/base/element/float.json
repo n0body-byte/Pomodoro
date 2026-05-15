@@ -6,7 +6,7 @@
     },
     {
       "name": "timer_font_size",
-      "value": "64fp"
+      "value": "68fp"
     },
     {
       "name": "title_font_size",
@@ -26,11 +26,11 @@
     },
     {
       "name": "caption_font_size",
-      "value": "13fp"
+      "value": "12fp"
     },
     {
       "name": "ring_stroke_width",
-      "value": "14fp"
+      "value": "32fp"
     },
     {
       "name": "spacing_xs",

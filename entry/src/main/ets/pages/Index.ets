@@ -1,10 +1,10 @@
-import { router } from '@kit.ArkUI';
 import { vibrator } from '@kit.SensorServiceKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { CircularProgress } from '../components/CircularProgress';
 import { TimerControls } from '../components/TimerControls';
-import { SessionCounter } from '../components/SessionCounter';
 import { PreferencesHelper } from '../utils/PreferencesHelper';
+import { Settings } from './Settings';
+import { Statistics } from './Statistics';
 import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
@@ -28,13 +28,14 @@ struct Index {
   @State progressValue: number = 100;
   @State todayCount: number = 0;
   @State dailyTarget: number = DEFAULT_DAILY_TARGET;
+  @State currentTabIndex: number = 0;
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
   private breakDuration: number = DEFAULT_BREAK_SECONDS;
   private autoStart: boolean = false;
   private tickCount: number = 0;
-  private navigatingAway: boolean = false;
+  private tabsController: TabsController = new TabsController();
 
   async aboutToAppear(): Promise<void> {
     await this.loadSettings();
@@ -52,10 +53,6 @@ struct Index {
 
   async onPageShow(): Promise<void> {
     await this.loadTodayStats();
-    if (this.navigatingAway) {
-      this.navigatingAway = false;
-      return;
-    }
     await this.recoverFromBackground();
   }
 
@@ -312,8 +309,130 @@ struct Index {
     this.updateProgress();
   }
 
-  build() {
+  private getCapsuleIndices(): number[] {
+    const arr: number[] = [];
+    for (let i = 0; i < this.dailyTarget; i++) {
+      arr.push(i);
+    }
+    return arr;
+  }
+
+  private async onNavigateToTimer(): Promise<void> {
+    await this.loadSettings();
+    if (!this.isRunning) {
+      this.totalSeconds = this.isWorkMode ? this.workDuration : this.breakDuration;
+      this.remainingSeconds = this.totalSeconds;
+      this.updateProgress();
+    }
+  }
+
+  @Builder
+  tabBarTimer() {
+    Column({ space: 1 }) {
+      Text('●')
+        .fontSize(18)
+        .fontColor(this.currentTabIndex === 0 ? '#F6DE03' : '#FFFFFF')
+      Text('计时')
+        .fontSize(10)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.currentTabIndex === 0 ? '#F6DE03' : '#FFFFFF')
+    }
+    .alignItems(HorizontalAlign.Center)
+    .justifyContent(FlexAlign.Center)
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  tabBarSettings() {
+    Column({ space: 1 }) {
+      Text('⚙')
+        .fontSize(18)
+        .fontColor(this.currentTabIndex === 1 ? '#F6DE03' : '#FFFFFF')
+      Text('设置')
+        .fontSize(10)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.currentTabIndex === 1 ? '#F6DE03' : '#FFFFFF')
+    }
+    .alignItems(HorizontalAlign.Center)
+    .justifyContent(FlexAlign.Center)
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  tabBarStatistics() {
+    Column({ space: 1 }) {
+      Text('⊞')
+        .fontSize(18)
+        .fontColor(this.currentTabIndex === 2 ? '#F6DE03' : '#FFFFFF')
+      Text('统计')
+        .fontSize(10)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.currentTabIndex === 2 ? '#F6DE03' : '#FFFFFF')
+    }
+    .alignItems(HorizontalAlign.Center)
+    .justifyContent(FlexAlign.Center)
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  timerTab() {
     Column() {
+      // Bento 风格今日进度卡片
+      Column({ space: 10 }) {
+        Row({ space: 6 }) {
+          Text('🍅')
+            .fontSize(14)
+          Text('TODAY')
+            .fontSize(10)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#8E8E93')
+            .letterSpacing(3)
+        }
+        .width('100%')
+
+        Row({ space: 3 }) {
+          ForEach(this.getCapsuleIndices(), (i: number) => {
+            Column()
+              .layoutWeight(1)
+              .height(18)
+              .borderRadius(2.5)
+              .backgroundColor(i < this.todayCount ? '#FA2E69' : '#2C2C2E')
+          }, (i: number) => i.toString())
+        }
+        .width('100%')
+
+        Row({ space: 8 }) {
+          Text(`${this.todayCount}/${this.dailyTarget}`)
+            .fontSize(14)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+
+          if (this.todayCount > 0) {
+            Button() {
+              Text('清空')
+                .fontSize(10)
+                .fontColor('#636366')
+            }
+              .height(24)
+              .backgroundColor(Color.Transparent)
+              .border({ width: 1, color: '#38383A', radius: 6 })
+              .padding({ left: 8, right: 8 })
+              .onClick(() => this.clearTodayData())
+          }
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.SpaceBetween)
+      }
+      .width('100%')
+      .padding({ left: 18, right: 18, top: 14, bottom: 14 })
+      .backgroundColor('#1C1C1E')
+      .borderRadius(18)
+      .border({ width: 1, color: '#1FFFFFFF' })
+
+      // 环形计时区
       Column({ space: 0 }) {
         CircularProgress({
           progress: this.progressValue,
@@ -322,73 +441,47 @@ struct Index {
           isWorkMode: this.isWorkMode
         })
 
-        Row({ space: 8 }) {
-          Row({ space: 8 }) {
-            Text('🍅')
-              .fontSize(16)
-            Text(`${this.todayCount}/${this.dailyTarget}`)
-              .fontSize($r('app.float.session_count_font_size'))
-              .fontColor($r('app.color.text_secondary'))
-              .fontWeight(FontWeight.Medium)
-          }
-          .padding({ left: 16, right: 16, top: 6, bottom: 6 })
-          .backgroundColor($r('app.color.surface'))
-          .borderRadius(12)
-
-          if (this.todayCount > 0) {
-            Button() {
-              Text('清空')
-                .fontSize(11)
-                .fontColor($r('app.color.text_tertiary'))
-            }
-              .height(28)
-              .backgroundColor(Color.Transparent)
-              .border({ width: 1, color: $r('app.color.divider'), radius: 8 })
-              .padding({ left: 10, right: 10 })
-              .onClick(() => this.clearTodayData())
-          }
-        }
-        .margin({ top: 20 })
-        .shadow({ radius: 4, color: '#10000000', offsetY: 2 })
-
         if (this.isRunning) {
           Row({ space: 8 }) {
             if (!this.isWorkMode) {
               Button() {
                 Text($r('app.string.btn_skip_break'))
-                  .fontSize($r('app.float.caption_font_size'))
-                  .fontColor($r('app.color.primary_red'))
+                  .fontSize(11)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor('#FA2E69')
               }
                 .height(32)
-                .backgroundColor('#FFF0F0')
+                .backgroundColor('#1AFA2E69')
                 .borderRadius(16)
                 .onClick(() => this.onSkipBreak())
             }
 
             Button() {
               Text($r('app.string.btn_extend'))
-                .fontSize($r('app.float.caption_font_size'))
-                .fontColor($r('app.color.primary_green'))
+                .fontSize(11)
+                .fontWeight(FontWeight.Medium)
+                .fontColor('#65FE08')
             }
               .height(32)
-              .backgroundColor('#F0FFF4')
+              .backgroundColor('#1A65FE08')
               .borderRadius(16)
               .onClick(() => this.onExtend())
 
             if (this.isWorkMode) {
               Button() {
                 Text($r('app.string.btn_end_early'))
-                  .fontSize($r('app.float.caption_font_size'))
-                  .fontColor($r('app.color.text_secondary'))
+                  .fontSize(11)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor('#8E8E93')
               }
                 .height(32)
-                .backgroundColor($r('app.color.ring_track'))
+                .backgroundColor('#2C2C2E')
                 .borderRadius(16)
                 .onClick(() => this.onEndEarly())
             }
           }
           .justifyContent(FlexAlign.Center)
-          .margin({ top: 16 })
+          .margin({ top: 20 })
           .animation({ duration: 200, curve: Curve.EaseInOut })
         }
 
@@ -398,60 +491,48 @@ struct Index {
           onStartPause: () => this.onStartPause(),
           onReset: () => this.onReset()
         })
-          .margin({ top: 24 })
+          .margin({ top: 28 })
       }
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
-
-      Row() {
-        Button() {
-          Row({ space: 4 }) {
-            Text('⚙')
-              .fontSize(14)
-              .fontColor($r('app.color.text_secondary'))
-            Text($r('app.string.btn_settings'))
-              .fontSize($r('app.float.caption_font_size'))
-              .fontColor($r('app.color.text_secondary'))
-          }
-        }
-          .backgroundColor(Color.Transparent)
-          .borderRadius(20)
-          .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-          .onClick(() => {
-            this.navigatingAway = true;
-            this.saveCurrentState().then(() => {
-              router.pushUrl({ url: 'pages/Settings' });
-            });
-          })
-
-        Button() {
-          Row({ space: 4 }) {
-            Text('📊')
-              .fontSize(14)
-              .fontColor($r('app.color.text_secondary'))
-            Text($r('app.string.btn_statistics'))
-              .fontSize($r('app.float.caption_font_size'))
-              .fontColor($r('app.color.text_secondary'))
-          }
-        }
-          .backgroundColor(Color.Transparent)
-          .borderRadius(20)
-          .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-          .onClick(() => {
-            this.navigatingAway = true;
-            this.saveCurrentState().then(() => {
-              router.pushUrl({ url: 'pages/Statistics' });
-            });
-          })
-      }
-      .justifyContent(FlexAlign.SpaceEvenly)
-      .width('100%')
-      .padding({ top: 12, bottom: 28 })
-      .backgroundColor($r('app.color.surface'))
-      .shadow({ radius: 8, color: '#08000000', offsetY: -2 })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.background'))
+    .padding({ left: 20, right: 20, top: 48 })
+  }
+
+  build() {
+    Tabs({ barPosition: BarPosition.End, controller: this.tabsController }) {
+      TabContent() {
+        this.timerTab()
+      }
+      .tabBar(this.tabBarTimer)
+
+      TabContent() {
+        Settings({ onSaved: async () => {
+          await this.onNavigateToTimer();
+          this.currentTabIndex = 0;
+          this.tabsController.changeIndex(0);
+        } })
+      }
+      .tabBar(this.tabBarSettings)
+
+      TabContent() {
+        Statistics()
+      }
+      .tabBar(this.tabBarStatistics)
+    }
+    .barHeight(56)
+    .barBackgroundColor('#1C1C1E')
+    .barMode(BarMode.Fixed)
+    .onChange((index: number) => {
+      this.currentTabIndex = index;
+      if (index === 0) {
+        this.onNavigateToTimer();
+      }
+    })
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#000000')
   }
 }

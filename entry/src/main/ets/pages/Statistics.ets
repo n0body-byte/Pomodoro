@@ -1,9 +1,7 @@
-import { router } from '@kit.ArkUI';
 import { PreferencesHelper, DailyStats } from '../utils/PreferencesHelper';
 
-@Entry
 @Component
-struct Statistics {
+export struct Statistics {
   @State selectedTab: number = 0;
   @State dailyData: DailyStats[] = [];
   @State weeklyData: DailyStats[] = [];
@@ -108,26 +106,12 @@ struct Statistics {
 
   build() {
     Column() {
-      Row() {
-        Button() {
-          Text('←')
-            .fontSize(20)
-            .fontColor($r('app.color.text_primary'))
-        }
-          .backgroundColor(Color.Transparent)
-          .width(40)
-          .height(40)
-          .borderRadius(20)
-          .onClick(() => router.back())
-
-        Text($r('app.string.statistics_title'))
-          .fontSize($r('app.float.title_font_size'))
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.Start)
-      .padding({ top: 48, bottom: 4, left: 8 })
+      Text($r('app.string.statistics_title'))
+        .fontSize($r('app.float.title_font_size'))
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+        .padding({ top: 8, bottom: 4, left: 8 })
 
       Row({ space: 8 }) {
         Button($r('app.string.tab_daily'))

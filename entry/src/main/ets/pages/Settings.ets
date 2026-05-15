@@ -1,14 +1,13 @@
-import { router } from '@kit.ArkUI';
 import { PreferencesHelper } from '../utils/PreferencesHelper';
 import { DEFAULT_WORK_SECONDS, DEFAULT_BREAK_SECONDS, DEFAULT_DAILY_TARGET } from '../common/Constants';
 
-@Entry
 @Component
-struct Settings {
+export struct Settings {
   @State workMinutes: number = 25;
   @State breakMinutes: number = 5;
   @State autoStart: boolean = false;
   @State dailyTarget: number = DEFAULT_DAILY_TARGET;
+  onSaved?: () => void;
 
   async aboutToAppear(): Promise<void> {
     try {
@@ -75,32 +74,26 @@ struct Settings {
       .then(() => PreferencesHelper.saveBreakDuration(ctx, breakSeconds))
       .then(() => PreferencesHelper.saveAutoStart(ctx, autoStartVal))
       .then(() => PreferencesHelper.saveDailyTarget(ctx, targetVal))
-      .then(() => router.back())
-      .catch(() => router.back());
+      .then(() => {
+        if (this.onSaved) {
+          this.onSaved();
+        }
+      })
+      .catch(() => {
+        if (this.onSaved) {
+          this.onSaved();
+        }
+      });
   }
 
   build() {
     Column() {
-      Row() {
-        Button() {
-          Text('←')
-            .fontSize(20)
-            .fontColor($r('app.color.text_primary'))
-        }
-          .backgroundColor(Color.Transparent)
-          .width(40)
-          .height(40)
-          .borderRadius(20)
-          .onClick(() => router.back())
-
-        Text($r('app.string.settings_title'))
-          .fontSize($r('app.float.title_font_size'))
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.Start)
-      .padding({ top: 48, bottom: 8, left: 8 })
+      Text($r('app.string.settings_title'))
+        .fontSize($r('app.float.title_font_size'))
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+        .padding({ top: 8, bottom: 12, left: 8 })
 
       Column({ space: 0 }) {
         Row() {
@@ -254,8 +247,8 @@ struct Settings {
         .height(50)
         .backgroundColor($r('app.color.primary_red'))
         .borderRadius(25)
-        .shadow({ radius: 12, color: '#40E74C3C', offsetY: 4 })
-        .margin({ bottom: 32 })
+        .shadow({ radius: 16, color: '#30FA2E69', offsetY: 6 })
+        .margin({ bottom: 12 })
         .onClick(() => this.onSave())
     }
     .width('100%')

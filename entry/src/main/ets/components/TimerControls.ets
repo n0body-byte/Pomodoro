@@ -4,41 +4,54 @@ export struct TimerControls {
   @Prop isWorkMode: boolean = true;
   onStartPause: () => void = () => {};
   onReset: () => void = () => {};
+  @State private mainPressed: boolean = false;
+  @State private resetPressed: boolean = false;
 
   build() {
-    Row({ space: 16 }) {
+    Column({ space: 24 }) {
+      // 主控按钮 — 大圆形
       Button() {
-        Row({ space: 8 }) {
-          Text(this.isRunning ? '⏸' : '▶')
-            .fontSize(16)
-          Text(this.isRunning ? $r('app.string.btn_pause') : $r('app.string.btn_start'))
-            .fontSize($r('app.float.button_font_size'))
-            .fontWeight(FontWeight.Medium)
-        }
+        Text(this.isRunning ? '⏸' : '▶')
+          .fontSize(32)
+          .fontColor(this.isWorkMode ? '#FA2E69' : '#65FE08')
       }
-        .width(160)
-        .height(52)
-        .fontColor(Color.White)
-        .backgroundColor(this.isWorkMode ? $r('app.color.primary_red') : $r('app.color.primary_green'))
-        .borderRadius(26)
-        .shadow({
-          radius: 12,
-          color: this.isWorkMode ? '#40E74C3C' : '#4027AE60',
-          offsetY: 4
+        .width(80)
+        .height(80)
+        .backgroundColor('#1C1C1E')
+        .borderRadius(40)
+        .border({ width: 3, color: this.isWorkMode ? '#FA2E69' : '#65FE08' })
+        .scale({ x: this.mainPressed ? 0.92 : 1, y: this.mainPressed ? 0.92 : 1 })
+        .animation({ duration: 150, curve: Curve.EaseOut })
+        .onTouch((event: TouchEvent) => {
+          if (event.type === TouchType.Down) {
+            this.mainPressed = true;
+          } else if (event.type === TouchType.Up) {
+            this.mainPressed = false;
+            this.onStartPause();
+          }
         })
-        .onClick(() => this.onStartPause())
 
+      // 重置按钮 — 小圆形深灰
       Button() {
         Text('↺')
-          .fontSize(20)
-          .fontColor($r('app.color.text_secondary'))
+          .fontSize(18)
+          .fontColor('#8E8E93')
       }
-        .width(48)
-        .height(48)
-        .backgroundColor($r('app.color.ring_track'))
-        .borderRadius(24)
-        .onClick(() => this.onReset())
+        .width(44)
+        .height(44)
+        .backgroundColor('#2C2C2E')
+        .borderRadius(22)
+        .scale({ x: this.resetPressed ? 0.9 : 1, y: this.resetPressed ? 0.9 : 1 })
+        .animation({ duration: 150, curve: Curve.EaseOut })
+        .onTouch((event: TouchEvent) => {
+          if (event.type === TouchType.Down) {
+            this.resetPressed = true;
+          } else if (event.type === TouchType.Up) {
+            this.resetPressed = false;
+            this.onReset();
+          }
+        })
     }
-    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
   }
 }

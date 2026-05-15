@@ -2,31 +2,31 @@
   "color": [
     {
       "name": "start_window_background",
-      "value": "#F8F9FA"
+      "value": "#000000"
     },
     {
       "name": "primary_red",
-      "value": "#E74C3C"
+      "value": "#FA2E69"
     },
     {
       "name": "primary_green",
-      "value": "#27AE60"
+      "value": "#65FE08"
     },
     {
       "name": "background",
-      "value": "#F8F9FA"
+      "value": "#000000"
     },
     {
       "name": "surface",
-      "value": "#FFFFFF"
+      "value": "#1C1C1E"
     },
     {
       "name": "ring_track",
-      "value": "#EEEEEE"
+      "value": "#2C2C2E"
     },
     {
       "name": "text_primary",
-      "value": "#1A1A1A"
+      "value": "#FFFFFF"
     },
     {
       "name": "text_secondary",
@@ -34,35 +34,35 @@
     },
     {
       "name": "text_tertiary",
-      "value": "#B0B0B6"
+      "value": "#636366"
     },
     {
       "name": "button_reset",
-      "value": "#E0E0E0"
+      "value": "#2C2C2E"
     },
     {
       "name": "background_white",
-      "value": "#F8F9FA"
+      "value": "#000000"
     },
     {
       "name": "background_light",
-      "value": "#FFF5F5"
+      "value": "#1C1C1E"
     },
     {
       "name": "button_primary",
-      "value": "#E74C3C"
+      "value": "#FA2E69"
     },
     {
       "name": "shadow",
-      "value": "#1A000000"
+      "value": "#00000000"
     },
     {
       "name": "divider",
-      "value": "#F0F0F0"
+      "value": "#38383A"
     },
     {
       "name": "accent_yellow",
-      "value": "#F39C12"
+      "value": "#F6DE03"
     }
   ]
 }
