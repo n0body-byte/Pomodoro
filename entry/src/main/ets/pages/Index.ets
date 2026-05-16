@@ -1,5 +1,6 @@
 import { vibrator } from '@kit.SensorServiceKit';
 import { notificationManager } from '@kit.NotificationKit';
+import { ConfigurationConstant } from '@kit.AbilityKit';
 import { CircularProgress } from '../components/CircularProgress';
 import { TimerControls } from '../components/TimerControls';
 import { PreferencesHelper } from '../utils/PreferencesHelper';
@@ -30,6 +31,7 @@ struct Index {
   @State todayBreakSeconds: number = 0;
   @State dailyTarget: number = DEFAULT_DAILY_TARGET;
   @State currentTabIndex: number = 0;
+  @State isDarkMode: boolean = false;
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
@@ -38,6 +40,9 @@ struct Index {
   private tabsController: TabsController = new TabsController();
 
   async aboutToAppear(): Promise<void> {
+    const ctx = this.getContext();
+    this.isDarkMode = await PreferencesHelper.loadTheme(ctx);
+    this.applyColorMode();
     await this.loadSettings();
     this.completedSessions = 0;
     this.todayCount = 0;
@@ -58,6 +63,23 @@ struct Index {
 
   async onPageHide(): Promise<void> {
     await this.saveCurrentState();
+  }
+
+  private applyColorMode(): void {
+    const ctx = this.getUIContext().getHostContext();
+    if (ctx) {
+      const appCtx = ctx.getApplicationContext();
+      appCtx.setColorMode(this.isDarkMode
+        ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+        : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT
+      );
+    }
+  }
+
+  private onThemeChange(isDark: boolean): void {
+    this.isDarkMode = isDark;
+    this.applyColorMode();
+    PreferencesHelper.saveTheme(this.getContext(), isDark);
   }
 
   private getContext(): Context {
@@ -345,23 +367,23 @@ struct Index {
     if (totalSeconds <= 0) {
       Row({ space: 2 }) {
         Text('0')
-          .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+          .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
         Text('m')
-          .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#636366')
+          .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_tertiary'))
       }
     } else {
       Row({ space: 2 }) {
         if (Math.floor(totalSeconds / 3600) > 0) {
           Text(`${Math.floor(totalSeconds / 3600)}`)
-            .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+            .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
           Text('h')
-            .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#636366')
+            .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_tertiary'))
         }
         if (Math.floor((totalSeconds % 3600) / 60) > 0 || Math.floor(totalSeconds / 3600) === 0) {
           Text(`${Math.floor((totalSeconds % 3600) / 60)}`)
-            .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+            .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
           Text('m')
-            .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#636366')
+            .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_tertiary'))
         }
       }
     }
@@ -391,11 +413,11 @@ struct Index {
       Image($r('app.media.pomodoro'))
         .width(18)
         .height(18)
-        .fillColor(this.currentTabIndex === 0 ? '#39FF14' : '#FFFFFF')
+        .fillColor(this.currentTabIndex === 0 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
       Text('计时')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 0 ? '#39FF14' : '#FFFFFF')
+        .fontColor(this.currentTabIndex === 0 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -409,11 +431,11 @@ struct Index {
       Image($r('app.media.settings'))
         .width(18)
         .height(18)
-        .fillColor(this.currentTabIndex === 1 ? '#39FF14' : '#FFFFFF')
+        .fillColor(this.currentTabIndex === 1 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
       Text('设置')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 1 ? '#39FF14' : '#FFFFFF')
+        .fontColor(this.currentTabIndex === 1 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -427,11 +449,11 @@ struct Index {
       Image($r('app.media.statistics'))
         .width(18)
         .height(18)
-        .fillColor(this.currentTabIndex === 2 ? '#39FF14' : '#FFFFFF')
+        .fillColor(this.currentTabIndex === 2 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
       Text('统计')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 2 ? '#39FF14' : '#FFFFFF')
+        .fontColor(this.currentTabIndex === 2 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -451,7 +473,7 @@ struct Index {
           Text('TODAY')
             .fontSize(10)
             .fontWeight(FontWeight.Bold)
-            .fontColor('#8E8E93')
+            .fontColor($r('app.color.today_label'))
             .letterSpacing(3)
         }
         .width('100%')
@@ -462,7 +484,7 @@ struct Index {
               .layoutWeight(1)
               .height(18)
               .borderRadius(2.5)
-              .backgroundColor(i < this.todayCount ? '#FA2E69' : '#2C2C2E')
+              .backgroundColor(i < this.todayCount ? $r('app.color.capsule_filled') : $r('app.color.capsule_empty'))
           }, (i: number) => i.toString())
         }
         .width('100%')
@@ -471,17 +493,17 @@ struct Index {
           Text(`${this.todayCount}/${this.dailyTarget}`)
             .fontSize(14)
             .fontWeight(FontWeight.Bold)
-            .fontColor('#FFFFFF')
+            .fontColor($r('app.color.text_primary'))
 
           if (this.todayCount > 0) {
             Button() {
               Text('清空')
                 .fontSize(10)
-                .fontColor('#636366')
+                .fontColor($r('app.color.text_tertiary'))
             }
               .height(24)
               .backgroundColor(Color.Transparent)
-              .border({ width: 1, color: '#38383A', radius: 6 })
+              .border({ width: 1, color: $r('app.color.divider'), radius: 6 })
               .padding({ left: 8, right: 8 })
               .onClick(() => this.clearTodayData())
           }
@@ -491,9 +513,9 @@ struct Index {
       }
       .width('100%')
       .padding({ left: 18, right: 18, top: 14, bottom: 14 })
-      .backgroundColor('#1C1C1E')
+      .backgroundColor($r('app.color.surface'))
       .borderRadius(18)
-      .border({ width: 1, color: '#1FFFFFFF' })
+      .border({ width: 1, color: $r('app.color.card_border') })
 
       // 环形计时区
       Column({ space: 0 }) {
@@ -523,19 +545,19 @@ struct Index {
           Image($r('app.media.focus'))
             .width(12)
             .height(12)
-            .fillColor('#FA2E69')
+            .fillColor($r('app.color.focus_color'))
           Text('专注')
             .fontSize(10)
             .fontWeight(FontWeight.Medium)
-            .fontColor('#FA2E69')
+            .fontColor($r('app.color.focus_color'))
         }
         this.durationDisplay(this.todayWorkSeconds)
       }
       .layoutWeight(1)
       .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-      .backgroundColor('#1C1C1E')
+      .backgroundColor($r('app.color.surface'))
       .borderRadius(14)
-      .border({ width: 1, color: '#1FFFFFFF' })
+      .border({ width: 1, color: $r('app.color.card_border') })
       .alignItems(HorizontalAlign.Start)
 
       Column({ space: 6 }) {
@@ -543,19 +565,19 @@ struct Index {
           Image($r('app.media.rest'))
             .width(12)
             .height(12)
-            .fillColor('#65FE08')
+            .fillColor($r('app.color.rest_color'))
           Text('休息')
             .fontSize(10)
             .fontWeight(FontWeight.Medium)
-            .fontColor('#65FE08')
+            .fontColor($r('app.color.rest_color'))
         }
         this.durationDisplay(this.todayBreakSeconds)
       }
       .layoutWeight(1)
       .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-      .backgroundColor('#1C1C1E')
+      .backgroundColor($r('app.color.surface'))
       .borderRadius(14)
-      .border({ width: 1, color: '#1FFFFFFF' })
+      .border({ width: 1, color: $r('app.color.card_border') })
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
@@ -574,11 +596,15 @@ struct Index {
       .tabBar(this.tabBarTimer)
 
       TabContent() {
-        Settings({ onSaved: async () => {
-          await this.onNavigateToTimer();
-          this.currentTabIndex = 0;
-          this.tabsController.changeIndex(0);
-        } })
+        Settings({
+          isDarkMode: this.isDarkMode,
+          onThemeChange: (isDark: boolean) => this.onThemeChange(isDark),
+          onSaved: async () => {
+            await this.onNavigateToTimer();
+            this.currentTabIndex = 0;
+            this.tabsController.changeIndex(0);
+          }
+        })
       }
       .tabBar(this.tabBarSettings)
 
@@ -588,7 +614,7 @@ struct Index {
       .tabBar(this.tabBarStatistics)
     }
     .barHeight(56)
-    .barBackgroundColor('#1C1C1E')
+    .barBackgroundColor($r('app.color.tab_bar_bg'))
     .barMode(BarMode.Fixed)
     .onChange((index: number) => {
       this.currentTabIndex = index;
@@ -598,6 +624,6 @@ struct Index {
     })
     .width('100%')
     .height('100%')
-    .backgroundColor('#000000')
+    .backgroundColor($r('app.color.background'))
   }
 }

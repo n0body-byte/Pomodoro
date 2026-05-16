@@ -15,11 +15,11 @@ export struct TimerControls {
       Button() {
         Text('↺')
           .fontSize(18)
-          .fontColor('#8E8E93')
+          .fontColor($r('app.color.text_secondary'))
       }
         .width(44)
         .height(44)
-        .backgroundColor('#2C2C2E')
+        .backgroundColor($r('app.color.ring_track'))
         .borderRadius(22)
         .scale({ x: this.resetPressed ? 0.9 : 1, y: this.resetPressed ? 0.9 : 1 })
         .animation({ duration: 150, curve: Curve.EaseOut })
@@ -37,13 +37,13 @@ export struct TimerControls {
         Image($r(this.isRunning ? 'app.media.pause' : 'app.media.start'))
           .width(32)
           .height(32)
-          .fillColor(this.isWorkMode ? '#FA2E69' : '#65FE08')
+          .fillColor(this.isWorkMode ? $r('app.color.primary_red') : $r('app.color.primary_green'))
       }
         .width(80)
         .height(80)
-        .backgroundColor('#1C1C1E')
+        .backgroundColor($r('app.color.main_button_bg'))
         .borderRadius(40)
-        .border({ width: 3, color: this.isWorkMode ? '#FA2E69' : '#65FE08' })
+        .border({ width: 3, color: this.isWorkMode ? $r('app.color.primary_red') : $r('app.color.primary_green') })
         .scale({ x: this.mainPressed ? 0.92 : 1, y: this.mainPressed ? 0.92 : 1 })
         .animation({ duration: 150, curve: Curve.EaseOut })
         .onTouch((event: TouchEvent) => {
@@ -59,11 +59,11 @@ export struct TimerControls {
       Button() {
         Text('→')
           .fontSize(18)
-          .fontColor('#8E8E93')
+          .fontColor($r('app.color.text_secondary'))
       }
         .width(44)
         .height(44)
-        .backgroundColor('#2C2C2E')
+        .backgroundColor($r('app.color.ring_track'))
         .borderRadius(22)
         .scale({ x: this.skipPressed ? 0.9 : 1, y: this.skipPressed ? 0.9 : 1 })
         .animation({ duration: 150, curve: Curve.EaseOut })

@@ -7,6 +7,7 @@ import {
   PREF_KEY_DAILY_TARGET,
   PREF_KEY_SESSION_HISTORY,
   PREF_KEY_TIMER_STATE,
+  PREF_KEY_THEME,
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET
@@ -209,6 +210,22 @@ export class PreferencesHelper {
     const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
     await prefs.put(PREF_KEY_TIMER_STATE, JSON.stringify(state));
     await prefs.flush();
+  }
+
+  static async saveTheme(context: Context, isDark: boolean): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_THEME, isDark);
+    await prefs.flush();
+  }
+
+  static async loadTheme(context: Context): Promise<boolean> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      const value = await prefs.get(PREF_KEY_THEME, false);
+      return value as boolean;
+    } catch {
+      return false;
+    }
   }
 
   static async loadTimerState(context: Context): Promise<TimerState | null> {

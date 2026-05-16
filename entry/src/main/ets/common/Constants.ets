@@ -11,6 +11,7 @@ export const PREF_KEY_AUTO_START = 'autoStart';
 export const PREF_KEY_DAILY_TARGET = 'dailyTarget';
 export const PREF_KEY_SESSION_HISTORY = 'sessionHistory';
 export const PREF_KEY_TIMER_STATE = 'timerState';
+export const PREF_KEY_THEME = 'theme';
 
 export const VIBRATION_DURATION_MS = 500;
 

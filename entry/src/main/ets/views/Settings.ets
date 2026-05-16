@@ -6,7 +6,9 @@ export struct Settings {
   @State workMinutes: number = 25;
   @State breakMinutes: number = 5;
   @State dailyTarget: number = DEFAULT_DAILY_TARGET;
+  @Prop isDarkMode: boolean = true;
   onSaved?: () => void;
+  onThemeChange?: (isDark: boolean) => void;
 
   async aboutToAppear(): Promise<void> {
     try {
@@ -138,7 +140,7 @@ export struct Settings {
         }
         .backgroundColor($r('app.color.surface'))
         .borderRadius(14)
-        .shadow({ radius: 6, color: '#10000000', offsetY: 2 })
+        .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
 
         // 休息时长卡片
         Column() {
@@ -188,7 +190,7 @@ export struct Settings {
         }
         .backgroundColor($r('app.color.surface'))
         .borderRadius(14)
-        .shadow({ radius: 6, color: '#10000000', offsetY: 2 })
+        .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
 
         // 每日目标卡片
         Column() {
@@ -213,7 +215,7 @@ export struct Settings {
               Text(`${this.dailyTarget}`)
                 .fontSize(20)
                 .fontWeight(FontWeight.Bold)
-                .fontColor('#4FC3F7')
+                .fontColor($r('app.color.daily_target'))
                 .width(36)
                 .textAlign(TextAlign.Center)
               Button() {
@@ -224,7 +226,7 @@ export struct Settings {
               }
                 .width(32)
                 .height(32)
-                .backgroundColor('#4FC3F7')
+                .backgroundColor($r('app.color.daily_target'))
                 .borderRadius(16)
                 .onClick(() => this.increaseTarget())
               Text($r('app.string.daily_target_unit'))
@@ -238,7 +240,50 @@ export struct Settings {
         }
         .backgroundColor($r('app.color.surface'))
         .borderRadius(14)
-        .shadow({ radius: 6, color: '#10000000', offsetY: 2 })
+        .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
+
+        // 主题切换卡片
+        Column() {
+          Row() {
+            Text('主题')
+              .fontSize($r('app.float.button_font_size'))
+              .fontColor($r('app.color.text_primary'))
+            Blank()
+            Row({ space: 8 }) {
+              Button('浅色')
+                .fontSize(12)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.isDarkMode ? $r('app.color.text_secondary') : Color.White)
+                .backgroundColor(this.isDarkMode ? $r('app.color.ring_track') : $r('app.color.primary_red'))
+                .height(32)
+                .borderRadius(16)
+                .padding({ left: 14, right: 14 })
+                .onClick(() => {
+                  if (this.onThemeChange) {
+                    this.onThemeChange(false);
+                  }
+                })
+              Button('深色')
+                .fontSize(12)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.isDarkMode ? Color.White : $r('app.color.text_secondary'))
+                .backgroundColor(this.isDarkMode ? $r('app.color.primary_red') : $r('app.color.ring_track'))
+                .height(32)
+                .borderRadius(16)
+                .padding({ left: 14, right: 14 })
+                .onClick(() => {
+                  if (this.onThemeChange) {
+                    this.onThemeChange(true);
+                  }
+                })
+            }
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+        }
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(14)
+        .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
       }
       .width('100%')
       .padding({ left: 12, right: 12, top: 16 })
@@ -255,7 +300,7 @@ export struct Settings {
         .height(50)
         .backgroundColor($r('app.color.primary_red'))
         .borderRadius(25)
-        .shadow({ radius: 16, color: '#30FA2E69', offsetY: 6 })
+        .shadow({ radius: 16, color: $r('app.color.shadow_button'), offsetY: 6 })
         .margin({ bottom: 12 })
         .onClick(() => this.onSave())
     }

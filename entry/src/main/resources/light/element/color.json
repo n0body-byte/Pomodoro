@@ -1,0 +1,30 @@
+{
+  "color": [
+    { "name": "start_window_background", "value": "#F2F2F7" },
+    { "name": "primary_red", "value": "#FA2E69" },
+    { "name": "primary_green", "value": "#34C759" },
+    { "name": "daily_target", "value": "#007AFF" },
+    { "name": "tab_selected", "value": "#34C759" },
+    { "name": "tab_unselected", "value": "#8E8E93" },
+    { "name": "background", "value": "#F2F2F7" },
+    { "name": "surface", "value": "#FFFFFF" },
+    { "name": "ring_track", "value": "#E5E5EA" },
+    { "name": "text_primary", "value": "#000000" },
+    { "name": "text_secondary", "value": "#6E6E73" },
+    { "name": "text_tertiary", "value": "#AEAEB2" },
+    { "name": "divider", "value": "#C6C6C8" },
+    { "name": "tab_bar_bg", "value": "#F9F9F9" },
+    { "name": "card_border", "value": "#1F999999" },
+    { "name": "capsule_empty", "value": "#E5E5EA" },
+    { "name": "capsule_filled", "value": "#FA2E69" },
+    { "name": "today_label", "value": "#6E6E73" },
+    { "name": "main_button_bg", "value": "#FFFFFF" },
+    { "name": "focus_color", "value": "#FA2E69" },
+    { "name": "rest_color", "value": "#34C759" },
+    { "name": "shadow_surface", "value": "#0D000000" },
+    { "name": "shadow_button", "value": "#30FA2E69" },
+    { "name": "button_reset", "value": "#E5E5EA" },
+    { "name": "button_primary", "value": "#FA2E69" },
+    { "name": "accent_yellow", "value": "#F6DE03" }
+  ]
+}

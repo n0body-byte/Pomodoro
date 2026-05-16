@@ -197,7 +197,7 @@ export struct Statistics {
       .backgroundColor($r('app.color.surface'))
       .borderRadius(12)
       .padding({ top: 4, bottom: 12, left: 8, right: 8 })
-      .shadow({ radius: 4, color: '#08000000', offsetY: 2 })
+      .shadow({ radius: 4, color: $r('app.color.shadow_surface'), offsetY: 2 })
     }
     .width('100%')
     .height('100%')
