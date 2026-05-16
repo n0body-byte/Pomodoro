@@ -4,6 +4,7 @@ import { ConfigurationConstant } from '@kit.AbilityKit';
 import { CircularProgress } from '../components/CircularProgress';
 import { TimerControls } from '../components/TimerControls';
 import { PreferencesHelper } from '../utils/PreferencesHelper';
+import { SoundHelper } from '../utils/SoundHelper';
 import { Settings } from '../views/Settings';
 import { Statistics } from '../views/Statistics';
 import {
@@ -32,6 +33,7 @@ struct Index {
   @State dailyTarget: number = DEFAULT_DAILY_TARGET;
   @State currentTabIndex: number = 0;
   @State isDarkMode: boolean = false;
+  @State soundName: string = 'bell';
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
@@ -42,6 +44,7 @@ struct Index {
   async aboutToAppear(): Promise<void> {
     const ctx = this.getContext();
     this.isDarkMode = await PreferencesHelper.loadTheme(ctx);
+    this.soundName = await PreferencesHelper.loadSound(ctx);
     this.applyColorMode();
     await this.loadSettings();
     this.completedSessions = 0;
@@ -156,6 +159,8 @@ struct Index {
   handleTimerComplete(): void {
     this.stopTimer();
 
+    SoundHelper.play(this.getContext(), this.soundName);
+
     if (this.isWorkMode) {
       this.completedSessions += 1;
       this.recordSession();
@@ -238,6 +243,7 @@ struct Index {
   onSkipBreak(): void {
     this.recordBreakSession();
     this.stopTimer();
+    SoundHelper.play(this.getContext(), this.soundName);
     this.switchToWork();
     setTimeout(() => {
       this.startTimer();
@@ -257,6 +263,7 @@ struct Index {
 
   onEndEarly(): void {
     this.stopTimer();
+    SoundHelper.play(this.getContext(), this.soundName);
     this.completedSessions += 1;
     this.recordSession();
     this.sendNotification(true);
@@ -598,7 +605,12 @@ struct Index {
       TabContent() {
         Settings({
           isDarkMode: this.isDarkMode,
+          soundName: this.soundName,
           onThemeChange: (isDark: boolean) => this.onThemeChange(isDark),
+          onSoundChange: (sound: string) => {
+            this.soundName = sound;
+            PreferencesHelper.saveSound(this.getContext(), sound);
+          },
           onSaved: async () => {
             await this.onNavigateToTimer();
             this.currentTabIndex = 0;

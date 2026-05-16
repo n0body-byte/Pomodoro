@@ -7,8 +7,10 @@ export struct Settings {
   @State breakMinutes: number = 5;
   @State dailyTarget: number = DEFAULT_DAILY_TARGET;
   @Prop isDarkMode: boolean = true;
+  @Prop soundName: string = 'bell';
   onSaved?: () => void;
   onThemeChange?: (isDark: boolean) => void;
+  onSoundChange?: (sound: string) => void;
 
   async aboutToAppear(): Promise<void> {
     try {
@@ -284,6 +286,26 @@ export struct Settings {
         .backgroundColor($r('app.color.surface'))
         .borderRadius(14)
         .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
+
+        // 提示音选择卡片
+        Column({ space: 8 }) {
+          Text('提示音')
+            .fontSize($r('app.float.button_font_size'))
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+          Row({ space: 6 }) {
+            SoundOption({ label: '钟铃', value: 'bell', current: this.soundName, onSelect: (v: string) => { if (this.onSoundChange) this.onSoundChange(v); } })
+            SoundOption({ label: '风铃', value: 'chime', current: this.soundName, onSelect: (v: string) => { if (this.onSoundChange) this.onSoundChange(v); } })
+            SoundOption({ label: '短促', value: 'beep', current: this.soundName, onSelect: (v: string) => { if (this.onSoundChange) this.onSoundChange(v); } })
+            SoundOption({ label: '双响', value: 'double_beep', current: this.soundName, onSelect: (v: string) => { if (this.onSoundChange) this.onSoundChange(v); } })
+            SoundOption({ label: '叮咚', value: 'ding', current: this.soundName, onSelect: (v: string) => { if (this.onSoundChange) this.onSoundChange(v); } })
+          }
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(14)
+        .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
       }
       .width('100%')
       .padding({ left: 12, right: 12, top: 16 })
@@ -307,5 +329,28 @@ export struct Settings {
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.background'))
+  }
+}
+
+@Component
+struct SoundOption {
+  @Prop label: string = '';
+  @Prop value: string = '';
+  @Prop current: string = '';
+  onSelect?: (value: string) => void;
+
+  build() {
+    Text(this.label)
+      .fontSize(11)
+      .fontWeight(FontWeight.Medium)
+      .fontColor(this.current === this.value ? Color.White : $r('app.color.text_secondary'))
+      .backgroundColor(this.current === this.value ? $r('app.color.primary_red') : $r('app.color.ring_track'))
+      .borderRadius(12)
+      .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+      .onClick(() => {
+        if (this.onSelect) {
+          this.onSelect(this.value);
+        }
+      })
   }
 }

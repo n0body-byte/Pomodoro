@@ -12,6 +12,7 @@ export const PREF_KEY_DAILY_TARGET = 'dailyTarget';
 export const PREF_KEY_SESSION_HISTORY = 'sessionHistory';
 export const PREF_KEY_TIMER_STATE = 'timerState';
 export const PREF_KEY_THEME = 'theme';
+export const PREF_KEY_SOUND = 'sound';
 
 export const VIBRATION_DURATION_MS = 500;
 
