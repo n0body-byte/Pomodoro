@@ -81,7 +81,7 @@ export struct Settings {
   }
 
   build() {
-    Column() {
+    Column({ space: 0 }) {
       Text($r('app.string.settings_title'))
         .fontSize($r('app.float.title_font_size'))
         .fontWeight(FontWeight.Bold)
@@ -89,127 +89,159 @@ export struct Settings {
         .width('100%')
         .padding({ top: 8, bottom: 12, left: 8 })
 
-      Column({ space: 0 }) {
-        Row() {
-          Text($r('app.string.work_duration_label'))
-            .fontSize($r('app.float.button_font_size'))
-            .fontColor($r('app.color.text_primary'))
-          Blank()
-          Row({ space: 10 }) {
-            Button('-')
-              .width(32)
-              .height(32)
-              .fontSize(16)
-              .fontColor($r('app.color.text_secondary'))
-              .backgroundColor($r('app.color.ring_track'))
-              .borderRadius(16)
-              .onClick(() => this.decreaseWork())
-            Text(`${this.workMinutes}`)
-              .fontSize(20)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.primary_red'))
-              .constraintSize({ minWidth: 32 })
-              .textAlign(TextAlign.Center)
-            Button('+')
-              .width(32)
-              .height(32)
-              .fontSize(16)
-              .fontColor(Color.White)
-              .backgroundColor($r('app.color.primary_red'))
-              .borderRadius(16)
-              .onClick(() => this.increaseWork())
-            Text($r('app.string.minutes_unit'))
-              .fontSize($r('app.float.label_font_size'))
-              .fontColor($r('app.color.text_tertiary'))
+      Column({ space: 10 }) {
+        // 工作时长卡片
+        Column() {
+          Row() {
+            Text($r('app.string.work_duration_label'))
+              .fontSize($r('app.float.button_font_size'))
+              .fontColor($r('app.color.text_primary'))
+              .width(74)
+            Blank()
+            Row({ space: 10 }) {
+              Button() {
+                Image($r('app.media.minus'))
+                  .width(16)
+                  .height(16)
+                  .fillColor($r('app.color.text_secondary'))
+              }
+                .width(32)
+                .height(32)
+                .backgroundColor($r('app.color.ring_track'))
+                .borderRadius(16)
+                .onClick(() => this.decreaseWork())
+              Text(`${this.workMinutes}`)
+                .fontSize(20)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.primary_red'))
+                .width(36)
+                .textAlign(TextAlign.Center)
+              Button() {
+                Image($r('app.media.plus'))
+                  .width(16)
+                  .height(16)
+                  .fillColor(Color.White)
+              }
+                .width(32)
+                .height(32)
+                .backgroundColor($r('app.color.primary_red'))
+                .borderRadius(16)
+                .onClick(() => this.increaseWork())
+              Text($r('app.string.minutes_unit'))
+                .fontSize($r('app.float.label_font_size'))
+                .fontColor($r('app.color.text_tertiary'))
+                .width(28)
+            }
           }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 14, bottom: 14 })
         }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(14)
+        .shadow({ radius: 6, color: '#10000000', offsetY: 2 })
 
-        Divider()
-          .color($r('app.color.divider'))
-          .margin({ left: 16, right: 16 })
-
-        Row() {
-          Text($r('app.string.break_duration_label'))
-            .fontSize($r('app.float.button_font_size'))
-            .fontColor($r('app.color.text_primary'))
-          Blank()
-          Row({ space: 10 }) {
-            Button('-')
-              .width(32)
-              .height(32)
-              .fontSize(16)
-              .fontColor($r('app.color.text_secondary'))
-              .backgroundColor($r('app.color.ring_track'))
-              .borderRadius(16)
-              .onClick(() => this.decreaseBreak())
-            Text(`${this.breakMinutes}`)
-              .fontSize(20)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.primary_green'))
-              .constraintSize({ minWidth: 32 })
-              .textAlign(TextAlign.Center)
-            Button('+')
-              .width(32)
-              .height(32)
-              .fontSize(16)
-              .fontColor(Color.White)
-              .backgroundColor($r('app.color.primary_green'))
-              .borderRadius(16)
-              .onClick(() => this.increaseBreak())
-            Text($r('app.string.minutes_unit'))
-              .fontSize($r('app.float.label_font_size'))
-              .fontColor($r('app.color.text_tertiary'))
+        // 休息时长卡片
+        Column() {
+          Row() {
+            Text($r('app.string.break_duration_label'))
+              .fontSize($r('app.float.button_font_size'))
+              .fontColor($r('app.color.text_primary'))
+              .width(74)
+            Blank()
+            Row({ space: 10 }) {
+              Button() {
+                Image($r('app.media.minus'))
+                  .width(16)
+                  .height(16)
+                  .fillColor($r('app.color.text_secondary'))
+              }
+                .width(32)
+                .height(32)
+                .backgroundColor($r('app.color.ring_track'))
+                .borderRadius(16)
+                .onClick(() => this.decreaseBreak())
+              Text(`${this.breakMinutes}`)
+                .fontSize(20)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.primary_green'))
+                .width(36)
+                .textAlign(TextAlign.Center)
+              Button() {
+                Image($r('app.media.plus'))
+                  .width(16)
+                  .height(16)
+                  .fillColor(Color.White)
+              }
+                .width(32)
+                .height(32)
+                .backgroundColor($r('app.color.primary_green'))
+                .borderRadius(16)
+                .onClick(() => this.increaseBreak())
+              Text($r('app.string.minutes_unit'))
+                .fontSize($r('app.float.label_font_size'))
+                .fontColor($r('app.color.text_tertiary'))
+                .width(28)
+            }
           }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 14, bottom: 14 })
         }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(14)
+        .shadow({ radius: 6, color: '#10000000', offsetY: 2 })
 
-        Divider()
-          .color($r('app.color.divider'))
-          .margin({ left: 16, right: 16 })
-
-        Row() {
-          Text($r('app.string.daily_target_label'))
-            .fontSize($r('app.float.button_font_size'))
-            .fontColor($r('app.color.text_primary'))
-          Blank()
-          Row({ space: 10 }) {
-            Button('-')
-              .width(32)
-              .height(32)
-              .fontSize(16)
-              .fontColor($r('app.color.text_secondary'))
-              .backgroundColor($r('app.color.ring_track'))
-              .borderRadius(16)
-              .onClick(() => this.decreaseTarget())
-            Text(`${this.dailyTarget}`)
-              .fontSize(20)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.primary_red'))
-              .constraintSize({ minWidth: 32 })
-              .textAlign(TextAlign.Center)
-            Button('+')
-              .width(32)
-              .height(32)
-              .fontSize(16)
-              .fontColor(Color.White)
-              .backgroundColor($r('app.color.primary_red'))
-              .borderRadius(16)
-              .onClick(() => this.increaseTarget())
-            Text($r('app.string.daily_target_unit'))
-              .fontSize($r('app.float.label_font_size'))
-              .fontColor($r('app.color.text_tertiary'))
+        // 每日目标卡片
+        Column() {
+          Row() {
+            Text($r('app.string.daily_target_label'))
+              .fontSize($r('app.float.button_font_size'))
+              .fontColor($r('app.color.text_primary'))
+              .width(74)
+            Blank()
+            Row({ space: 10 }) {
+              Button() {
+                Image($r('app.media.minus'))
+                  .width(16)
+                  .height(16)
+                  .fillColor($r('app.color.text_secondary'))
+              }
+                .width(32)
+                .height(32)
+                .backgroundColor($r('app.color.ring_track'))
+                .borderRadius(16)
+                .onClick(() => this.decreaseTarget())
+              Text(`${this.dailyTarget}`)
+                .fontSize(20)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#4FC3F7')
+                .width(36)
+                .textAlign(TextAlign.Center)
+              Button() {
+                Image($r('app.media.plus'))
+                  .width(16)
+                  .height(16)
+                  .fillColor(Color.White)
+              }
+                .width(32)
+                .height(32)
+                .backgroundColor('#4FC3F7')
+                .borderRadius(16)
+                .onClick(() => this.increaseTarget())
+              Text($r('app.string.daily_target_unit'))
+                .fontSize($r('app.float.label_font_size'))
+                .fontColor($r('app.color.text_tertiary'))
+                .width(28)
+            }
           }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 14, bottom: 14 })
         }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(14)
+        .shadow({ radius: 6, color: '#10000000', offsetY: 2 })
       }
-      .backgroundColor($r('app.color.surface'))
-      .borderRadius(14)
-      .margin({ left: 12, right: 12, top: 16 })
-      .shadow({ radius: 6, color: '#10000000', offsetY: 2 })
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 16 })
 
       Blank()
 
