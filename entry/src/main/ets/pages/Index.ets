@@ -3,8 +3,8 @@ import { notificationManager } from '@kit.NotificationKit';
 import { CircularProgress } from '../components/CircularProgress';
 import { TimerControls } from '../components/TimerControls';
 import { PreferencesHelper } from '../utils/PreferencesHelper';
-import { Settings } from './Settings';
-import { Statistics } from './Statistics';
+import { Settings } from '../views/Settings';
+import { Statistics } from '../views/Statistics';
 import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
@@ -340,16 +340,31 @@ struct Index {
     this.updateProgress();
   }
 
-  private formatDuration(totalSeconds: number): string {
+  @Builder
+  durationDisplay(totalSeconds: number) {
     if (totalSeconds <= 0) {
-      return '0m';
+      Row({ space: 2 }) {
+        Text('0')
+          .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+        Text('m')
+          .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#636366')
+      }
+    } else {
+      Row({ space: 2 }) {
+        if (Math.floor(totalSeconds / 3600) > 0) {
+          Text(`${Math.floor(totalSeconds / 3600)}`)
+            .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+          Text('h')
+            .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#636366')
+        }
+        if (Math.floor((totalSeconds % 3600) / 60) > 0 || Math.floor(totalSeconds / 3600) === 0) {
+          Text(`${Math.floor((totalSeconds % 3600) / 60)}`)
+            .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+          Text('m')
+            .fontSize(18).fontWeight(FontWeight.Bold).fontColor('#636366')
+        }
+      }
     }
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    if (hours > 0) {
-      return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-    }
-    return `${minutes}m`;
   }
 
   private getCapsuleIndices(): number[] {
@@ -373,13 +388,14 @@ struct Index {
   @Builder
   tabBarTimer() {
     Column({ space: 1 }) {
-      Text('●')
-        .fontSize(18)
-        .fontColor(this.currentTabIndex === 0 ? '#F6DE03' : '#FFFFFF')
+      Image($r('app.media.pomodoro'))
+        .width(18)
+        .height(18)
+        .fillColor(this.currentTabIndex === 0 ? '#39FF14' : '#FFFFFF')
       Text('计时')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 0 ? '#F6DE03' : '#FFFFFF')
+        .fontColor(this.currentTabIndex === 0 ? '#39FF14' : '#FFFFFF')
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -390,13 +406,14 @@ struct Index {
   @Builder
   tabBarSettings() {
     Column({ space: 1 }) {
-      Text('⚙')
-        .fontSize(18)
-        .fontColor(this.currentTabIndex === 1 ? '#F6DE03' : '#FFFFFF')
+      Image($r('app.media.settings'))
+        .width(18)
+        .height(18)
+        .fillColor(this.currentTabIndex === 1 ? '#39FF14' : '#FFFFFF')
       Text('设置')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 1 ? '#F6DE03' : '#FFFFFF')
+        .fontColor(this.currentTabIndex === 1 ? '#39FF14' : '#FFFFFF')
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -407,13 +424,14 @@ struct Index {
   @Builder
   tabBarStatistics() {
     Column({ space: 1 }) {
-      Text('⊞')
-        .fontSize(18)
-        .fontColor(this.currentTabIndex === 2 ? '#F6DE03' : '#FFFFFF')
+      Image($r('app.media.statistics'))
+        .width(18)
+        .height(18)
+        .fillColor(this.currentTabIndex === 2 ? '#39FF14' : '#FFFFFF')
       Text('统计')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 2 ? '#F6DE03' : '#FFFFFF')
+        .fontColor(this.currentTabIndex === 2 ? '#39FF14' : '#FFFFFF')
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -427,8 +445,9 @@ struct Index {
       // Bento 风格今日进度卡片
       Column({ space: 10 }) {
         Row({ space: 6 }) {
-          Text('🍅')
-            .fontSize(14)
+          Image($r('app.media.tomato'))
+            .width(14)
+            .height(14)
           Text('TODAY')
             .fontSize(10)
             .fontWeight(FontWeight.Bold)
@@ -501,17 +520,16 @@ struct Index {
     Row({ space: 8 }) {
       Column({ space: 6 }) {
         Row({ space: 4 }) {
-          Text('⏱')
-            .fontSize(12)
+          Image($r('app.media.focus'))
+            .width(12)
+            .height(12)
+            .fillColor('#FA2E69')
           Text('专注')
             .fontSize(10)
             .fontWeight(FontWeight.Medium)
-            .fontColor('#8E8E93')
+            .fontColor('#FA2E69')
         }
-        Text(this.formatDuration(this.todayWorkSeconds))
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
+        this.durationDisplay(this.todayWorkSeconds)
       }
       .layoutWeight(1)
       .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -522,17 +540,16 @@ struct Index {
 
       Column({ space: 6 }) {
         Row({ space: 4 }) {
-          Text('☕')
-            .fontSize(12)
+          Image($r('app.media.rest'))
+            .width(12)
+            .height(12)
+            .fillColor('#65FE08')
           Text('休息')
             .fontSize(10)
             .fontWeight(FontWeight.Medium)
-            .fontColor('#8E8E93')
+            .fontColor('#65FE08')
         }
-        Text(this.formatDuration(this.todayBreakSeconds))
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
+        this.durationDisplay(this.todayBreakSeconds)
       }
       .layoutWeight(1)
       .padding({ left: 14, right: 14, top: 12, bottom: 12 })

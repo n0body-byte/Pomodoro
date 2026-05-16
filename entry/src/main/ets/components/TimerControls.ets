@@ -34,9 +34,10 @@ export struct TimerControls {
 
       // 开始/暂停
       Button() {
-        Text(this.isRunning ? '⏸' : '▶')
-          .fontSize(32)
-          .fontColor(this.isWorkMode ? '#FA2E69' : '#65FE08')
+        Image($r(this.isRunning ? 'app.media.pause' : 'app.media.start'))
+          .width(32)
+          .height(32)
+          .fillColor(this.isWorkMode ? '#FA2E69' : '#65FE08')
       }
         .width(80)
         .height(80)
