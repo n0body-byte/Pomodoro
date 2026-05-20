@@ -9,6 +9,7 @@ import {
   PREF_KEY_TIMER_STATE,
   PREF_KEY_THEME,
   PREF_KEY_SOUND,
+  PREF_KEY_AMBIENT,
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET
@@ -223,6 +224,22 @@ export class PreferencesHelper {
     const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
     await prefs.put(PREF_KEY_SOUND, sound);
     await prefs.flush();
+  }
+
+  static async saveAmbient(context: Context, ambient: string): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AMBIENT, ambient);
+    await prefs.flush();
+  }
+
+  static async loadAmbient(context: Context): Promise<string> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      const value = await prefs.get(PREF_KEY_AMBIENT, '');
+      return value as string;
+    } catch {
+      return '';
+    }
   }
 
   static async loadSound(context: Context): Promise<string> {

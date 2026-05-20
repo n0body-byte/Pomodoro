@@ -6,11 +6,14 @@ export struct Settings {
   @State workMinutes: number = 25;
   @State breakMinutes: number = 5;
   @State dailyTarget: number = DEFAULT_DAILY_TARGET;
+  @State autoStart: boolean = false;
   @Prop isDarkMode: boolean = true;
   @Prop soundName: string = 'bell';
+  @Prop ambientName: string = '';
   onSaved?: () => void;
   onThemeChange?: (isDark: boolean) => void;
   onSoundChange?: (sound: string) => void;
+  onAmbientChange?: (ambient: string) => void;
 
   async aboutToAppear(): Promise<void> {
     try {
@@ -18,13 +21,16 @@ export struct Settings {
       const workSeconds = await PreferencesHelper.loadWorkDuration(ctx);
       const breakSeconds = await PreferencesHelper.loadBreakDuration(ctx);
       const targetVal = await PreferencesHelper.loadDailyTarget(ctx);
+      const autoStartVal = await PreferencesHelper.loadAutoStart(ctx);
       this.workMinutes = Math.floor(workSeconds / 60);
       this.breakMinutes = Math.floor(breakSeconds / 60);
       this.dailyTarget = targetVal;
+      this.autoStart = autoStartVal;
     } catch {
       this.workMinutes = Math.floor(DEFAULT_WORK_SECONDS / 60);
       this.breakMinutes = Math.floor(DEFAULT_BREAK_SECONDS / 60);
       this.dailyTarget = DEFAULT_DAILY_TARGET;
+      this.autoStart = false;
     }
   }
 
@@ -93,6 +99,7 @@ export struct Settings {
         .width('100%')
         .padding({ top: 8, bottom: 12, left: 8 })
 
+      Scroll() {
       Column({ space: 10 }) {
         // 工作时长卡片
         Column() {
@@ -217,7 +224,7 @@ export struct Settings {
               Text(`${this.dailyTarget}`)
                 .fontSize(20)
                 .fontWeight(FontWeight.Bold)
-                .fontColor($r('app.color.daily_target'))
+                .fontColor($r('app.color.primary_red'))
                 .width(36)
                 .textAlign(TextAlign.Center)
               Button() {
@@ -228,7 +235,7 @@ export struct Settings {
               }
                 .width(32)
                 .height(32)
-                .backgroundColor($r('app.color.daily_target'))
+                .backgroundColor($r('app.color.primary_red'))
                 .borderRadius(16)
                 .onClick(() => this.increaseTarget())
               Text($r('app.string.daily_target_unit'))
@@ -236,6 +243,28 @@ export struct Settings {
                 .fontColor($r('app.color.text_tertiary'))
                 .width(28)
             }
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+        }
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(14)
+        .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
+
+        // 自动开始开关卡片
+        Column() {
+          Row() {
+            Text($r('app.string.auto_start_label'))
+              .fontSize($r('app.float.button_font_size'))
+              .fontColor($r('app.color.text_primary'))
+            Blank()
+            Toggle({ type: ToggleType.Switch, isOn: this.autoStart })
+              .selectedColor($r('app.color.primary_red'))
+              .onChange((isOn: boolean) => {
+                this.autoStart = isOn;
+                const ctx = this.getUIContext().getHostContext()!;
+                PreferencesHelper.saveAutoStart(ctx, isOn);
+              })
           }
           .width('100%')
           .padding({ left: 16, right: 16, top: 14, bottom: 14 })
@@ -306,11 +335,32 @@ export struct Settings {
         .backgroundColor($r('app.color.surface'))
         .borderRadius(14)
         .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
+
+        // 白噪音卡片
+        Column({ space: 8 }) {
+          Text('白噪音')
+            .fontSize($r('app.float.button_font_size'))
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+          Row({ space: 6 }) {
+            AmbientOption({ label: '关闭', value: '', current: this.ambientName, onSelect: (v: string) => { if (this.onAmbientChange) this.onAmbientChange(v); } })
+            AmbientOption({ label: '雨声', value: 'rain', current: this.ambientName, onSelect: (v: string) => { if (this.onAmbientChange) this.onAmbientChange(v); } })
+            AmbientOption({ label: '咖啡馆', value: 'cafe', current: this.ambientName, onSelect: (v: string) => { if (this.onAmbientChange) this.onAmbientChange(v); } })
+            AmbientOption({ label: '森林', value: 'forest', current: this.ambientName, onSelect: (v: string) => { if (this.onAmbientChange) this.onAmbientChange(v); } })
+          }
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(14)
+        .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
       }
       .width('100%')
       .padding({ left: 12, right: 12, top: 16 })
-
-      Blank()
+      }
+      .scrollBar(BarState.Off)
+      .layoutWeight(1)
+      .width('100%')
 
       Button() {
         Text($r('app.string.btn_save'))
@@ -334,6 +384,29 @@ export struct Settings {
 
 @Component
 struct SoundOption {
+  @Prop label: string = '';
+  @Prop value: string = '';
+  @Prop current: string = '';
+  onSelect?: (value: string) => void;
+
+  build() {
+    Text(this.label)
+      .fontSize(11)
+      .fontWeight(FontWeight.Medium)
+      .fontColor(this.current === this.value ? Color.White : $r('app.color.text_secondary'))
+      .backgroundColor(this.current === this.value ? $r('app.color.primary_red') : $r('app.color.ring_track'))
+      .borderRadius(12)
+      .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+      .onClick(() => {
+        if (this.onSelect) {
+          this.onSelect(this.value);
+        }
+      })
+  }
+}
+
+@Component
+struct AmbientOption {
   @Prop label: string = '';
   @Prop value: string = '';
   @Prop current: string = '';

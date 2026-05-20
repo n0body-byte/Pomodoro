@@ -13,6 +13,7 @@ export const PREF_KEY_SESSION_HISTORY = 'sessionHistory';
 export const PREF_KEY_TIMER_STATE = 'timerState';
 export const PREF_KEY_THEME = 'theme';
 export const PREF_KEY_SOUND = 'sound';
+export const PREF_KEY_AMBIENT = 'ambient';
 
 export const VIBRATION_DURATION_MS = 500;
 

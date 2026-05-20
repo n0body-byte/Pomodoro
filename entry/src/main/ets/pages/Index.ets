@@ -5,6 +5,7 @@ import { CircularProgress } from '../components/CircularProgress';
 import { TimerControls } from '../components/TimerControls';
 import { PreferencesHelper } from '../utils/PreferencesHelper';
 import { SoundHelper } from '../utils/SoundHelper';
+import { AmbientHelper } from '../utils/AmbientHelper';
 import { Settings } from '../views/Settings';
 import { Statistics } from '../views/Statistics';
 import {
@@ -34,6 +35,8 @@ struct Index {
   @State currentTabIndex: number = 0;
   @State isDarkMode: boolean = false;
   @State soundName: string = 'bell';
+  @State autoStartNext: boolean = false;
+  @State ambientName: string = '';
   @State showCelebration: boolean = false;
 
   private timerId: number | null = null;
@@ -46,6 +49,8 @@ struct Index {
     const ctx = this.getContext();
     this.isDarkMode = await PreferencesHelper.loadTheme(ctx);
     this.soundName = await PreferencesHelper.loadSound(ctx);
+    this.autoStartNext = await PreferencesHelper.loadAutoStart(ctx);
+    this.ambientName = await PreferencesHelper.loadAmbient(ctx);
     this.applyColorMode();
     await this.loadSettings();
     this.completedSessions = 0;
@@ -129,6 +134,9 @@ struct Index {
     this.isRunning = true;
     this.tickCount = 0;
     this.publishOngoingNotification();
+    if (this.isWorkMode && this.ambientName !== '') {
+      AmbientHelper.start(this.getContext(), this.ambientName);
+    }
     this.timerId = setInterval(() => {
       this.tick();
     }, 1000);
@@ -141,6 +149,7 @@ struct Index {
     }
     this.isRunning = false;
     this.cancelOngoingNotification();
+    AmbientHelper.stop();
   }
 
   tick(): void {
@@ -173,9 +182,11 @@ struct Index {
       this.switchToWork();
     }
 
-    setTimeout(() => {
-      this.startTimer();
-    }, 2000);
+    if (this.autoStartNext) {
+      setTimeout(() => {
+        this.startTimer();
+      }, 2000);
+    }
   }
 
   private getTodayStr(): string {
@@ -260,9 +271,11 @@ struct Index {
     this.stopTimer();
     SoundHelper.play(this.getContext(), this.soundName);
     this.switchToWork();
-    setTimeout(() => {
-      this.startTimer();
-    }, 2000);
+    if (this.autoStartNext) {
+      setTimeout(() => {
+        this.startTimer();
+      }, 2000);
+    }
   }
 
   onSkipPhase(): void {
@@ -283,9 +296,11 @@ struct Index {
     this.recordSession();
     this.sendNotification(true);
     this.switchToBreak();
-    setTimeout(() => {
-      this.startTimer();
-    }, 2000);
+    if (this.autoStartNext) {
+      setTimeout(() => {
+        this.startTimer();
+      }, 2000);
+    }
   }
 
   sendNotification(isWorkEnd: boolean): void {
@@ -421,6 +436,7 @@ struct Index {
 
   private async onNavigateToTimer(): Promise<void> {
     await this.loadSettings();
+    this.autoStartNext = await PreferencesHelper.loadAutoStart(this.getContext());
     // 仅在初始状态（未曾开始或刚完成复位）时应用新设置，暂停中的计时不受影响
     if (!this.isRunning && this.remainingSeconds === this.totalSeconds) {
       this.totalSeconds = this.isWorkMode ? this.workDuration : this.breakDuration;
@@ -654,10 +670,15 @@ struct Index {
         Settings({
           isDarkMode: this.isDarkMode,
           soundName: this.soundName,
+          ambientName: this.ambientName,
           onThemeChange: (isDark: boolean) => this.onThemeChange(isDark),
           onSoundChange: (sound: string) => {
             this.soundName = sound;
             PreferencesHelper.saveSound(this.getContext(), sound);
+          },
+          onAmbientChange: (ambient: string) => {
+            this.ambientName = ambient;
+            PreferencesHelper.saveAmbient(this.getContext(), ambient);
           },
           onSaved: async () => {
             await this.onNavigateToTimer();
