@@ -47,6 +47,15 @@ struct Index {
 
   async aboutToAppear(): Promise<void> {
     const ctx = this.getContext();
+    // 请求通知权限
+    try {
+      const enabled = await notificationManager.isNotificationEnabled();
+      if (!enabled) {
+        await new Promise<void>((resolve) => {
+          notificationManager.requestEnableNotification(() => { resolve(); });
+        });
+      }
+    } catch { }
     this.isDarkMode = await PreferencesHelper.loadTheme(ctx);
     this.soundName = await PreferencesHelper.loadSound(ctx);
     this.autoStartNext = await PreferencesHelper.loadAutoStart(ctx);
@@ -307,6 +316,7 @@ struct Index {
     try {
       const request: notificationManager.NotificationRequest = {
         id: isWorkEnd ? NOTIFICATION_WORK_END_ID : NOTIFICATION_BREAK_END_ID,
+        notificationSlotType: notificationManager.SlotType.SOCIAL_COMMUNICATION,
         content: {
           notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
           normal: {

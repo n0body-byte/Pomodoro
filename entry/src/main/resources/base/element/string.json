@@ -143,6 +143,10 @@
     {
       "name": "stats_total",
       "value": "总计: %d 个番茄"
+    },
+    {
+      "name": "notification_permission_reason",
+      "value": "用于在通知栏显示计时进度"
     }
   ]
 }
