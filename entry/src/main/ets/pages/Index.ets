@@ -34,6 +34,7 @@ struct Index {
   @State currentTabIndex: number = 0;
   @State isDarkMode: boolean = false;
   @State soundName: string = 'bell';
+  @State showCelebration: boolean = false;
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
@@ -183,12 +184,26 @@ struct Index {
   }
 
   recordSession(): void {
+    const prevCount = this.todayCount;
     PreferencesHelper.saveSessionRecord(this.getContext(), {
       date: this.getTodayStr(),
       workSeconds: this.totalSeconds - this.remainingSeconds,
       completedAt: Date.now(),
       type: 'work'
-    }).then(() => this.loadTodayStats());
+    }).then(async () => {
+      await this.loadTodayStats();
+      if (prevCount < this.dailyTarget && this.todayCount >= this.dailyTarget) {
+        this.triggerCelebration();
+      }
+    });
+  }
+
+  triggerCelebration(): void {
+    this.showCelebration = true;
+    SoundHelper.play(this.getContext(), 'celebration');
+    setTimeout(() => {
+      this.showCelebration = false;
+    }, 4000);
   }
 
   recordBreakSession(): void {
@@ -470,6 +485,7 @@ struct Index {
 
   @Builder
   timerTab() {
+    Stack() {
     Column() {
       // Bento 风格今日进度卡片
       Column({ space: 10 }) {
@@ -589,10 +605,42 @@ struct Index {
     }
     .width('100%')
     .margin({ bottom: 8 })
-  }
+    }
     .width('100%')
     .height('100%')
     .padding({ left: 20, right: 20, top: 48 })
+
+    if (this.showCelebration) {
+      Column() {
+        Image($r('app.media.tomato'))
+          .width(64)
+          .height(64)
+          .fillColor($r('app.color.primary_red'))
+          .scale({ x: this.showCelebration ? 1 : 0.3, y: this.showCelebration ? 1 : 0.3 })
+          .animation({ duration: 500, curve: Curve.EaseOut })
+
+        Text('今日目标达成！')
+          .fontSize(26)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.primary_red'))
+          .margin({ top: 12 })
+
+        Text('太棒了，继续加油！')
+          .fontSize(15)
+          .fontColor($r('app.color.text_secondary'))
+          .margin({ top: 6 })
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center)
+      .backgroundColor($r('app.color.background'))
+      .opacity(0.95)
+      .onClick(() => {
+        this.showCelebration = false;
+      })
+    }
+    }
   }
 
   build() {
