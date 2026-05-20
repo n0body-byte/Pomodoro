@@ -7,7 +7,10 @@ export struct Statistics {
   @State weeklyData: DailyStats[] = [];
   @State monthlyData: DailyStats[] = [];
   @State totalSeconds: number = 0;
-  private retryCount: number = 0;
+  @State avgSeconds: number = 0;
+  @State maxSeconds: number = 0;
+  @State sessionCount: number = 0;
+  private hostCtx: Context | null = null;
 
   async aboutToAppear(): Promise<void> {
     await this.loadAllStats();
@@ -17,28 +20,42 @@ export struct Statistics {
     await this.loadAllStats();
   }
 
-  private async loadAllStats(): Promise<void> {
+  private getContext(): Context | null {
     const ctx = this.getUIContext().getHostContext();
-    if (ctx === undefined) {
-      if (this.retryCount < 5) {
-        this.retryCount += 1;
-        setTimeout(() => this.loadAllStats(), 300);
-      }
+    return ctx !== undefined ? ctx : null;
+  }
+
+  private async loadAllStats(): Promise<void> {
+    const ctx = this.getContext();
+    if (ctx === null) {
+      setTimeout(() => this.loadAllStats(), 200);
       return;
     }
-    this.retryCount = 0;
     try {
       const daily = await PreferencesHelper.getStats(ctx, 7);
-      const weekly = await PreferencesHelper.getStats(ctx, 28);
-      const monthly = await PreferencesHelper.getStats(ctx, 180);
+      const weekly = await PreferencesHelper.getWeeklyStats(ctx, 4);
+      const monthly = await PreferencesHelper.getMonthlyStats(ctx, 6);
       this.dailyData = daily;
       this.weeklyData = weekly;
       this.monthlyData = monthly;
-      let totalSeconds = 0;
-      for (const s of monthly) {
-        totalSeconds += s.totalSeconds;
+
+      const active = this.getActiveData();
+      let total = 0;
+      let max = 0;
+      let count = 0;
+      for (const s of active) {
+        total += s.totalSeconds;
+        if (s.totalSeconds > max) {
+          max = s.totalSeconds;
+        }
+        if (s.totalSeconds > 0) {
+          count += 1;
+        }
       }
-      this.totalSeconds = totalSeconds;
+      this.totalSeconds = total;
+      this.maxSeconds = max;
+      this.avgSeconds = count > 0 ? Math.floor(total / count) : 0;
+      this.sessionCount = count;
     } catch {
       // 加载失败静默处理
     }
@@ -56,10 +73,10 @@ export struct Statistics {
 
   private getBarHeight(totalSeconds: number, maxSeconds: number): number {
     if (totalSeconds <= 0 || maxSeconds <= 0) {
-      return 4;
+      return 0;
     }
-    const height = (totalSeconds / maxSeconds) * 180;
-    return Math.max(4, height);
+    const height = (totalSeconds / maxSeconds) * 160;
+    return Math.max(0, height);
   }
 
   private getBarLabel(totalSeconds: number): string {
@@ -80,32 +97,32 @@ export struct Statistics {
 
   private getTotalLabel(totalSeconds: number): string {
     if (totalSeconds === 0) {
-      return '暂无数据';
+      return '0 分钟';
     }
     if (totalSeconds < 60) {
-      return `总计: ${totalSeconds} 秒`;
+      return `${totalSeconds} 秒`;
     }
     const minutes = Math.floor(totalSeconds / 60);
     if (minutes < 60) {
-      return `总计: ${minutes} 分钟`;
+      return `${minutes} 分钟`;
     }
     const hours = Math.floor(minutes / 60);
     const remain = minutes % 60;
-    return remain === 0 ? `总计: ${hours} 小时` : `总计: ${hours}小时${remain}分钟`;
+    return remain === 0 ? `${hours} 小时` : `${hours} 小时 ${remain} 分钟`;
   }
 
-  private getMaxSeconds(data: DailyStats[]): number {
-    let max = 1;
-    for (const s of data) {
-      if (s.totalSeconds > max) {
-        max = s.totalSeconds;
-      }
-    }
-    return max;
+  private getTodayStr(): string {
+    const today = new Date();
+    return `${today.getMonth() + 1}/${today.getDate()}`;
+  }
+
+  private isToday(date: string): boolean {
+    return date === this.getTodayStr();
   }
 
   build() {
     Column() {
+      // 标题
       Text($r('app.string.statistics_title'))
         .fontSize($r('app.float.title_font_size'))
         .fontWeight(FontWeight.Bold)
@@ -113,6 +130,7 @@ export struct Statistics {
         .width('100%')
         .padding({ top: 8, bottom: 4, left: 8 })
 
+      // Tab 切换
       Row({ space: 8 }) {
         Button($r('app.string.tab_daily'))
           .fontSize($r('app.float.label_font_size'))
@@ -122,7 +140,7 @@ export struct Statistics {
           .borderRadius(18)
           .height(36)
           .layoutWeight(1)
-          .onClick(() => { this.selectedTab = 0; })
+          .onClick(() => { this.selectedTab = 0; this.loadAllStats(); })
 
         Button($r('app.string.tab_weekly'))
           .fontSize($r('app.float.label_font_size'))
@@ -132,7 +150,7 @@ export struct Statistics {
           .borderRadius(18)
           .height(36)
           .layoutWeight(1)
-          .onClick(() => { this.selectedTab = 1; })
+          .onClick(() => { this.selectedTab = 1; this.loadAllStats(); })
 
         Button($r('app.string.tab_monthly'))
           .fontSize($r('app.float.label_font_size'))
@@ -142,61 +160,151 @@ export struct Statistics {
           .borderRadius(18)
           .height(36)
           .layoutWeight(1)
-          .onClick(() => { this.selectedTab = 2; })
+          .onClick(() => { this.selectedTab = 2; this.loadAllStats(); })
       }
       .backgroundColor($r('app.color.ring_track'))
       .borderRadius(20)
       .padding(3)
       .width('90%')
-      .margin({ top: 12, bottom: 16 })
+      .margin({ top: 12, bottom: 12 })
 
-      Column() {
-        Row() {
-          Text(this.getTotalLabel(this.totalSeconds))
-            .fontSize($r('app.float.label_font_size'))
-            .fontColor($r('app.color.text_secondary'))
-            .fontWeight(FontWeight.Medium)
-            .margin({ top: 8, bottom: 16 })
-        }
-
-        Scroll() {
-          Row({ space: 6 }) {
-            ForEach(this.getActiveData(), (item: DailyStats, index: number) => {
-              Column({ space: 4 }) {
-                Text(this.getBarLabel(item.totalSeconds))
-                  .fontSize(10)
-                  .fontColor($r('app.color.text_tertiary'))
-                  .height(16)
-
-                Column()
-                  .width(32)
-                  .height(this.getBarHeight(item.totalSeconds, this.getMaxSeconds(this.getActiveData())))
-                  .backgroundColor(item.totalSeconds > 0 ? $r('app.color.primary_red') : $r('app.color.ring_track'))
-                  .borderRadius(4)
-                  .opacity(item.totalSeconds > 0 ? 1 : 0.5)
-                  .animation({ duration: 600, curve: Curve.EaseOut })
-
-                Text(item.date)
-                  .fontSize(10)
-                  .fontColor($r('app.color.text_tertiary'))
-                  .constraintSize({ maxWidth: 52 })
-                  .textAlign(TextAlign.Center)
-              }
-              .alignItems(HorizontalAlign.Center)
-            }, (item: DailyStats) => item.date)
+      // 数据概览卡片
+      Column({ space: 8 }) {
+        Row({ space: 0 }) {
+          Column({ space: 2 }) {
+            Text('总专注')
+              .fontSize(10)
+              .fontColor($r('app.color.text_tertiary'))
+              .fontWeight(FontWeight.Medium)
+            Text(this.getTotalLabel(this.totalSeconds))
+              .fontSize(22)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.primary_red'))
           }
-          .alignItems(VerticalAlign.Bottom)
-          .padding({ left: 12, right: 12 })
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+
+          Column({ space: 2 }) {
+            Text('日均')
+              .fontSize(10)
+              .fontColor($r('app.color.text_tertiary'))
+              .fontWeight(FontWeight.Medium)
+            Text(this.getTotalLabel(this.avgSeconds))
+              .fontSize(22)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.daily_target'))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Center)
+
+          Column({ space: 2 }) {
+            Text('活跃天数')
+              .fontSize(10)
+              .fontColor($r('app.color.text_tertiary'))
+              .fontWeight(FontWeight.Medium)
+            Text(`${this.sessionCount}`)
+              .fontSize(22)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.primary_green'))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.End)
         }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .height(220)
         .width('100%')
+
+        Divider()
+          .width('100%')
+          .height(1)
+          .color($r('app.color.divider'))
+
+        Row() {
+          Text('单日最佳: ')
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
+          Text(this.getTotalLabel(this.maxSeconds))
+            .fontSize(11)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Start)
       }
       .width('100%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 14 })
       .backgroundColor($r('app.color.surface'))
-      .borderRadius(12)
-      .padding({ top: 4, bottom: 12, left: 8, right: 8 })
+      .borderRadius(14)
+      .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
+
+      Blank().height(12)
+
+      // 柱状图卡片
+      Column() {
+        if (this.sessionCount === 0) {
+          Column({ space: 8 }) {
+            Text('📊')
+              .fontSize(40)
+            Text('暂无数据')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_secondary'))
+            Text('开始计时后，专注数据将在这里展示')
+              .fontSize(12)
+              .fontColor($r('app.color.text_tertiary'))
+          }
+          .width('100%')
+          .height(220)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+        } else {
+          Scroll() {
+            Row({ space: 9 }) {
+              ForEach(this.getActiveData(), (item: DailyStats) => {
+                Column({ space: 6 }) {
+                  // 数值标签
+                  Text(this.getBarLabel(item.totalSeconds))
+                    .fontSize(11)
+                    .fontWeight(item.totalSeconds > 0 ? FontWeight.Bold : FontWeight.Normal)
+                    .fontColor(item.totalSeconds > 0 ? $r('app.color.primary_red') : $r('app.color.text_tertiary'))
+                    .height(18)
+
+                  // 柱体
+                  Column()
+                    .width(40)
+                    .height(this.getBarHeight(item.totalSeconds, this.maxSeconds))
+                    .borderRadius(8)
+                    .linearGradient({
+                      direction: GradientDirection.Bottom,
+                      colors: item.totalSeconds > 0
+                        ? [[$r('app.color.primary_red'), 0], [$r('app.color.primary_red'), 0.7], ['#FFCDD2', 1]]
+                        : [[$r('app.color.ring_track'), 0], [$r('app.color.ring_track'), 1]]
+                    })
+                    .opacity(item.totalSeconds > 0 ? 1 : 0.4)
+                    .animation({ duration: 500, curve: Curve.EaseOut })
+
+                  // 日期
+                  Text(this.isToday(item.date) ? '今天' : item.date)
+                    .fontSize(11)
+                    .fontColor(this.isToday(item.date) ? $r('app.color.primary_red') : $r('app.color.text_tertiary'))
+                    .fontWeight(this.isToday(item.date) ? FontWeight.Bold : FontWeight.Normal)
+                    .constraintSize({ maxWidth: 52 })
+                    .textAlign(TextAlign.Center)
+                }
+                .alignItems(HorizontalAlign.Center)
+              }, (item: DailyStats) => item.date)
+            }
+            .alignItems(VerticalAlign.Bottom)
+            .padding({ left: 12, right: 12, top: 8, bottom: 4 })
+          }
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Off)
+          .height(240)
+          .width('100%')
+        }
+      }
+      .width('100%')
+      .padding({ top: 12, bottom: 16, left: 4, right: 4 })
+      .backgroundColor($r('app.color.surface'))
+      .borderRadius(14)
       .shadow({ radius: 4, color: $r('app.color.shadow_surface'), offsetY: 2 })
     }
     .width('100%')

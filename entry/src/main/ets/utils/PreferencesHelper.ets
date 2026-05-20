@@ -208,6 +208,73 @@ export class PreferencesHelper {
     return result;
   }
 
+  static async getWeeklyStats(context: Context, weeks: number): Promise<DailyStats[]> {
+    const history = await PreferencesHelper.loadSessionHistory(context);
+    const now = new Date();
+
+    // 定位到本周一
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayDow = today.getDay(); // 0=Sun
+    const mondayOffset = todayDow === 0 ? -6 : (1 - todayDow);
+    const thisMonday = new Date(today);
+    thisMonday.setDate(today.getDate() + mondayOffset);
+
+    // 倒推 weeks 周前的周一
+    const startMonday = new Date(thisMonday);
+    startMonday.setDate(startMonday.getDate() - (weeks - 1) * 7);
+
+    const result: DailyStats[] = [];
+    for (let w = 0; w < weeks; w++) {
+      const mon = new Date(startMonday);
+      mon.setDate(mon.getDate() + w * 7);
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+
+      const label = `${mon.getMonth() + 1}/${mon.getDate()}-${sun.getMonth() + 1}/${sun.getDate()}`;
+
+      let total = 0;
+      const dayCursor = new Date(mon);
+      for (let d = 0; d < 7; d++) {
+        const key = `${dayCursor.getFullYear()}-${(dayCursor.getMonth() + 1).toString().padStart(2, '0')}-${dayCursor.getDate().toString().padStart(2, '0')}`;
+        for (const record of history) {
+          if (record.date === key) {
+            total += record.workSeconds;
+          }
+        }
+        dayCursor.setDate(dayCursor.getDate() + 1);
+      }
+      result.push({ date: label, totalSeconds: total });
+    }
+    return result;
+  }
+
+  static async getMonthlyStats(context: Context, months: number): Promise<DailyStats[]> {
+    const history = await PreferencesHelper.loadSessionHistory(context);
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth(); // 0-indexed
+
+    const result: DailyStats[] = [];
+    for (let i = months - 1; i >= 0; i--) {
+      let m = month - i;
+      let y = year;
+      while (m < 0) {
+        m += 12;
+        y -= 1;
+      }
+      const label = `${m + 1}月`;
+      const prefix = `${y}-${(m + 1).toString().padStart(2, '0')}-`;
+      let total = 0;
+      for (const record of history) {
+        if (record.date.startsWith(prefix)) {
+          total += record.workSeconds;
+        }
+      }
+      result.push({ date: label, totalSeconds: total });
+    }
+    return result;
+  }
+
   static async saveTimerState(context: Context, state: TimerState): Promise<void> {
     const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
     await prefs.put(PREF_KEY_TIMER_STATE, JSON.stringify(state));
