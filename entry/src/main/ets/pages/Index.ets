@@ -8,6 +8,7 @@ import { SoundHelper } from '../utils/SoundHelper';
 import { AmbientHelper } from '../utils/AmbientHelper';
 import { Settings } from '../views/Settings';
 import { Statistics } from '../views/Statistics';
+import { Achievements } from '../views/Achievements';
 import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
@@ -510,6 +511,24 @@ struct Index {
   }
 
   @Builder
+  tabBarAchievements() {
+    Column({ space: 1 }) {
+      Image($r('app.media.tomato'))
+        .width(18)
+        .height(18)
+        .fillColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+      Text('成就')
+        .fontSize(10)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+    }
+    .alignItems(HorizontalAlign.Center)
+    .justifyContent(FlexAlign.Center)
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
   timerTab() {
     Stack() {
     Column() {
@@ -703,6 +722,11 @@ struct Index {
         Statistics()
       }
       .tabBar(this.tabBarStatistics)
+
+      TabContent() {
+        Achievements({ active: this.currentTabIndex === 3 })
+      }
+      .tabBar(this.tabBarAchievements)
     }
     .barHeight(56)
     .barBackgroundColor($r('app.color.tab_bar_bg'))
