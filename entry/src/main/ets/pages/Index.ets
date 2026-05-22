@@ -513,7 +513,7 @@ struct Index {
   @Builder
   tabBarAchievements() {
     Column({ space: 1 }) {
-      Image($r('app.media.tomato'))
+      Image($r('app.media.achievement'))
         .width(18)
         .height(18)
         .fillColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
