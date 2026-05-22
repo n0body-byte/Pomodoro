@@ -1,11 +1,11 @@
-import { vibrator } from '@kit.SensorServiceKit';
-import { notificationManager } from '@kit.NotificationKit';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 import { CircularProgress } from '../components/CircularProgress';
 import { TimerControls } from '../components/TimerControls';
+import { CelebrationOverlay } from '../components/CelebrationOverlay';
 import { PreferencesHelper } from '../utils/PreferencesHelper';
 import { SoundHelper } from '../utils/SoundHelper';
 import { AmbientHelper } from '../utils/AmbientHelper';
+import { NotificationHelper } from '../utils/NotificationHelper';
 import { Settings } from '../views/Settings';
 import { Statistics } from '../views/Statistics';
 import { Achievements } from '../views/Achievements';
@@ -13,10 +13,6 @@ import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET,
-  VIBRATION_DURATION_MS,
-  NOTIFICATION_WORK_END_ID,
-  NOTIFICATION_BREAK_END_ID,
-  NOTIFICATION_ONGOING_ID,
   NOTIFICATION_UPDATE_INTERVAL
 } from '../common/Constants';
 
@@ -48,15 +44,7 @@ struct Index {
 
   async aboutToAppear(): Promise<void> {
     const ctx = this.getContext();
-    // 请求通知权限
-    try {
-      const enabled = await notificationManager.isNotificationEnabled();
-      if (!enabled) {
-        await new Promise<void>((resolve) => {
-          notificationManager.requestEnableNotification(() => { resolve(); });
-        });
-      }
-    } catch { }
+    await NotificationHelper.requestPermission();
     this.isDarkMode = await PreferencesHelper.loadTheme(ctx);
     this.soundName = await PreferencesHelper.loadSound(ctx);
     this.autoStartNext = await PreferencesHelper.loadAutoStart(ctx);
@@ -71,7 +59,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
-    this.cancelOngoingNotification();
+    NotificationHelper.cancelOngoing();
     this.stopTimer();
   }
 
@@ -143,7 +131,7 @@ struct Index {
     }
     this.isRunning = true;
     this.tickCount = 0;
-    this.publishOngoingNotification();
+    NotificationHelper.publishOngoing(this.remainingSeconds, this.isWorkMode);
     if (this.isWorkMode && this.ambientName !== '') {
       AmbientHelper.start(this.getContext(), this.ambientName);
     }
@@ -158,7 +146,7 @@ struct Index {
       this.timerId = null;
     }
     this.isRunning = false;
-    this.cancelOngoingNotification();
+    NotificationHelper.cancelOngoing();
     AmbientHelper.stop();
   }
 
@@ -168,7 +156,7 @@ struct Index {
     this.tickCount += 1;
 
     if (this.tickCount % NOTIFICATION_UPDATE_INTERVAL === 0) {
-      this.publishOngoingNotification();
+      NotificationHelper.publishOngoing(this.remainingSeconds, this.isWorkMode);
     }
 
     if (this.remainingSeconds <= 0) {
@@ -184,11 +172,11 @@ struct Index {
     if (this.isWorkMode) {
       this.completedSessions += 1;
       this.recordSession();
-      this.sendNotification(true);
+      NotificationHelper.sendEndNotification(true);
       this.switchToBreak();
     } else {
       this.recordBreakSession();
-      this.sendNotification(false);
+      NotificationHelper.sendEndNotification(false);
       this.switchToWork();
     }
 
@@ -304,66 +292,12 @@ struct Index {
     SoundHelper.play(this.getContext(), this.soundName);
     this.completedSessions += 1;
     this.recordSession();
-    this.sendNotification(true);
+    NotificationHelper.sendEndNotification(true);
     this.switchToBreak();
     if (this.autoStartNext) {
       setTimeout(() => {
         this.startTimer();
       }, 2000);
-    }
-  }
-
-  sendNotification(isWorkEnd: boolean): void {
-    try {
-      const request: notificationManager.NotificationRequest = {
-        id: isWorkEnd ? NOTIFICATION_WORK_END_ID : NOTIFICATION_BREAK_END_ID,
-        notificationSlotType: notificationManager.SlotType.SOCIAL_COMMUNICATION,
-        content: {
-          notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-          normal: {
-            title: '番茄钟',
-            text: isWorkEnd ? '工作时间结束，休息一下吧！' : '休息时间结束，开始工作吧！'
-          }
-        }
-      };
-      notificationManager.publish(request);
-
-      vibrator.startVibration({
-        type: 'time',
-        duration: VIBRATION_DURATION_MS
-      }, {
-        usage: 'alarm'
-      });
-    } catch {
-      // 通知或振动失败时静默处理
-    }
-  }
-
-  publishOngoingNotification(): void {
-    try {
-      const minutes = Math.floor(this.remainingSeconds / 60).toString().padStart(2, '0');
-      const seconds = (this.remainingSeconds % 60).toString().padStart(2, '0');
-      const request: notificationManager.NotificationRequest = {
-        id: NOTIFICATION_ONGOING_ID,
-        content: {
-          notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-          normal: {
-            title: '番茄钟计时中',
-            text: `${this.isWorkMode ? '工作中' : '休息中'} ${minutes}:${seconds}`
-          }
-        }
-      };
-      notificationManager.publish(request);
-    } catch {
-      // 发布失败静默处理
-    }
-  }
-
-  cancelOngoingNotification(): void {
-    try {
-      notificationManager.cancel(NOTIFICATION_ONGOING_ID);
-    } catch {
-      // 取消失败静默处理
     }
   }
 
@@ -655,36 +589,10 @@ struct Index {
     .height('100%')
     .padding({ left: 20, right: 20, top: 48 })
 
-    if (this.showCelebration) {
-      Column() {
-        Image($r('app.media.tomato'))
-          .width(64)
-          .height(64)
-          .fillColor($r('app.color.primary_red'))
-          .scale({ x: this.showCelebration ? 1 : 0.3, y: this.showCelebration ? 1 : 0.3 })
-          .animation({ duration: 500, curve: Curve.EaseOut })
-
-        Text('今日目标达成！')
-          .fontSize(26)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.primary_red'))
-          .margin({ top: 12 })
-
-        Text('太棒了，继续加油！')
-          .fontSize(15)
-          .fontColor($r('app.color.text_secondary'))
-          .margin({ top: 6 })
-      }
-      .width('100%')
-      .height('100%')
-      .justifyContent(FlexAlign.Center)
-      .alignItems(HorizontalAlign.Center)
-      .backgroundColor($r('app.color.background'))
-      .opacity(0.95)
-      .onClick(() => {
-        this.showCelebration = false;
-      })
-    }
+    CelebrationOverlay({
+      show: this.showCelebration,
+      onDismiss: () => { this.showCelebration = false; }
+    })
     }
   }
 
