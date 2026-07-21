@@ -1,5 +1,14 @@
 import { PreferencesHelper, SessionRecord } from './PreferencesHelper';
 
+function parseLocalDate(value: string): Date {
+  const parts = value.split('-');
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+}
+
+function formatLocalDate(value: Date): string {
+  return `${value.getFullYear()}-${(value.getMonth() + 1).toString().padStart(2, '0')}-${value.getDate().toString().padStart(2, '0')}`;
+}
+
 export interface AchievementDef {
   id: string;
   name: string;
@@ -11,7 +20,7 @@ export interface AchievementDef {
 export class AchievementHelper {
   static async compute(context: Context): Promise<AchievementDef[]> {
     const history = await PreferencesHelper.loadSessionHistory(context);
-    const workRecords = history.filter((r: SessionRecord) => r.type !== 'break');
+    const workRecords = history.filter((r: SessionRecord) => PreferencesHelper.isCompletedWorkRecord(r));
 
     // 1. 总工作 session 数量
     const totalCount = workRecords.length;
@@ -46,8 +55,8 @@ export class AchievementHelper {
         currentStreak = 1;
         continue;
       }
-      const prev = new Date(dates[i]);
-      const next = new Date(dates[i + 1]);
+      const prev = parseLocalDate(dates[i]);
+      const next = parseLocalDate(dates[i + 1]);
       const diff = Math.floor((next.getTime() - prev.getTime()) / 86400000);
       if (diff === 1) {
         currentStreak += 1;
@@ -65,11 +74,11 @@ export class AchievementHelper {
     const refDate = dayMap[todayStr] ? todayStr : (dayMap[yesterdayStr] ? yesterdayStr : '');
     if (refDate !== '') {
       streak = 1;
-      const ref = new Date(refDate);
+      const ref = parseLocalDate(refDate);
       for (let d = 1; d < 366; d++) {
         const check = new Date(ref);
         check.setDate(check.getDate() - d);
-        const checkStr = `${check.getFullYear()}-${(check.getMonth() + 1).toString().padStart(2, '0')}-${check.getDate().toString().padStart(2, '0')}`;
+        const checkStr = formatLocalDate(check);
         if (dayMap[checkStr]) {
           streak += 1;
         } else {
@@ -86,7 +95,7 @@ export class AchievementHelper {
     let hasEarlyBird = false;
     let hasNightOwl = false;
     for (const r of history) {
-      if (r.type === 'break') {
+      if (!PreferencesHelper.isCompletedWorkRecord(r)) {
         continue;
       }
       const hour = new Date(r.completedAt).getHours();
@@ -104,13 +113,13 @@ export class AchievementHelper {
     const weekMap: Record<string, number> = {};
     const monthMap: Record<string, number> = {};
     for (const r of workRecords) {
-      const d = new Date(r.date);
-      // 周 key: 年份 + 周数（以周一为准）
+      const d = parseLocalDate(r.date);
+      // 使用周一日期作为周 key，避免跨月时近似周数产生碰撞
       const dayOfWeek = d.getDay();
       const mondayOffset = dayOfWeek === 0 ? -6 : (1 - dayOfWeek);
       const mon = new Date(d);
       mon.setDate(d.getDate() + mondayOffset);
-      const weekKey = `${mon.getFullYear()}-W${Math.ceil((mon.getMonth() * 30 + mon.getDate()) / 7)}`;
+      const weekKey = formatLocalDate(mon);
       weekMap[weekKey] = (weekMap[weekKey] || 0) + r.workSeconds;
       // 月 key
       const monthKey = `${d.getFullYear()}-${d.getMonth() + 1}`;

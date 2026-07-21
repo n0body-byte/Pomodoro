@@ -20,6 +20,8 @@ export interface SessionRecord {
   workSeconds: number;
   completedAt: number;
   type?: 'work' | 'break';
+  status?: 'completed' | 'abandoned' | 'skipped';
+  plannedSeconds?: number;
 }
 
 export interface TimerState {
@@ -29,6 +31,7 @@ export interface TimerState {
   isRunning: boolean;
   completedSessions: number;
   savedAt: number;
+  deadlineAt?: number;
 }
 
 export interface DailyStats {
@@ -108,6 +111,13 @@ export class PreferencesHelper {
     if (typeof raw === 'string' && raw.length > 0) {
       history = JSON.parse(raw) as SessionRecord[];
     }
+    const recordType = record.type === 'break' ? 'break' : 'work';
+    for (const item of history) {
+      const itemType = item.type === 'break' ? 'break' : 'work';
+      if (item.completedAt === record.completedAt && itemType === recordType) {
+        return;
+      }
+    }
     history.push(record);
     await prefs.put(PREF_KEY_SESSION_HISTORY, JSON.stringify(history));
     await prefs.flush();
@@ -144,7 +154,9 @@ export class PreferencesHelper {
     const history = await PreferencesHelper.loadSessionHistory(context);
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
-    return history.filter((r: SessionRecord) => r.date === todayStr && r.type !== 'break').length;
+    return history.filter((r: SessionRecord) =>
+      r.date === todayStr && PreferencesHelper.isCompletedWorkRecord(r)
+    ).length;
   }
 
   static async getTodayWorkSeconds(context: Context): Promise<number> {
@@ -190,7 +202,7 @@ export class PreferencesHelper {
 
     // record.date 本身就是 "YYYY-MM-DD"，直接用作 key 查找
     for (const record of history) {
-      if (statsMap[record.date] !== undefined) {
+      if (record.type !== 'break' && statsMap[record.date] !== undefined) {
         statsMap[record.date] += record.workSeconds;
       }
     }
@@ -237,7 +249,7 @@ export class PreferencesHelper {
       for (let d = 0; d < 7; d++) {
         const key = `${dayCursor.getFullYear()}-${(dayCursor.getMonth() + 1).toString().padStart(2, '0')}-${dayCursor.getDate().toString().padStart(2, '0')}`;
         for (const record of history) {
-          if (record.date === key) {
+          if (record.type !== 'break' && record.date === key) {
             total += record.workSeconds;
           }
         }
@@ -266,7 +278,7 @@ export class PreferencesHelper {
       const prefix = `${y}-${(m + 1).toString().padStart(2, '0')}-`;
       let total = 0;
       for (const record of history) {
-        if (record.date.startsWith(prefix)) {
+        if (record.type !== 'break' && record.date.startsWith(prefix)) {
           total += record.workSeconds;
         }
       }
@@ -279,6 +291,10 @@ export class PreferencesHelper {
     const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
     await prefs.put(PREF_KEY_TIMER_STATE, JSON.stringify(state));
     await prefs.flush();
+  }
+
+  static isCompletedWorkRecord(record: SessionRecord): boolean {
+    return record.type !== 'break' && (record.status === undefined || record.status === 'completed');
   }
 
   static async saveTheme(context: Context, isDark: boolean): Promise<void> {

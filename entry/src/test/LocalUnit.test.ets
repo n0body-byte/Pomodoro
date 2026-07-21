@@ -1,4 +1,6 @@
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
+import { PreferencesHelper, SessionRecord } from '../main/ets/utils/PreferencesHelper';
+import { TimerHelper } from '../main/ets/utils/TimerHelper';
 
 export default function localUnitTest() {
   describe('localUnitTest', () => {
@@ -21,13 +23,26 @@ export default function localUnitTest() {
       // Presets a clear action, which is performed after all test cases of the test suite end.
       // This API supports only one parameter: clear action function.
     });
-    it('assertContain', 0, () => {
-      // Defines a test case. This API supports three parameters: test case name, filter parameter, and test case function.
-      let a = 'abc';
-      let b = 'b';
-      // Defines a variety of assertion methods, which are used to declare expected boolean conditions.
-      expect(a).assertContain(b);
-      expect(a).assertEqual(a);
+    it('calculateRemainingSeconds', 0, () => {
+      expect(TimerHelper.calculateRemainingSeconds(5000, 4000)).assertEqual(1);
+      expect(TimerHelper.calculateRemainingSeconds(5000, 4001)).assertEqual(1);
+      expect(TimerHelper.calculateRemainingSeconds(5000, 5000)).assertEqual(0);
+      expect(TimerHelper.calculateRemainingSeconds(5000, 6000)).assertEqual(0);
+    });
+
+    it('completedWorkRecordCompatibility', 0, () => {
+      const legacyRecord: SessionRecord = {
+        date: '2026-07-21', workSeconds: 1500, completedAt: 1, type: 'work'
+      };
+      const abandonedRecord: SessionRecord = {
+        date: '2026-07-21', workSeconds: 300, completedAt: 2, type: 'work', status: 'abandoned'
+      };
+      const breakRecord: SessionRecord = {
+        date: '2026-07-21', workSeconds: 300, completedAt: 3, type: 'break', status: 'completed'
+      };
+      expect(PreferencesHelper.isCompletedWorkRecord(legacyRecord)).assertTrue();
+      expect(PreferencesHelper.isCompletedWorkRecord(abandonedRecord)).assertFalse();
+      expect(PreferencesHelper.isCompletedWorkRecord(breakRecord)).assertFalse();
     });
   });
 }

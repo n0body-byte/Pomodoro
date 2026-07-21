@@ -6,6 +6,7 @@ import { PreferencesHelper } from '../utils/PreferencesHelper';
 import { SoundHelper } from '../utils/SoundHelper';
 import { AmbientHelper } from '../utils/AmbientHelper';
 import { NotificationHelper } from '../utils/NotificationHelper';
+import { TimerHelper } from '../utils/TimerHelper';
 import { Settings } from '../views/Settings';
 import { Statistics } from '../views/Statistics';
 import { Achievements } from '../views/Achievements';
@@ -15,6 +16,8 @@ import {
   DEFAULT_DAILY_TARGET,
   NOTIFICATION_UPDATE_INTERVAL
 } from '../common/Constants';
+
+const MAX_RECOVERED_PHASES = 32;
 
 @Entry
 @Component
@@ -40,6 +43,9 @@ struct Index {
   private workDuration: number = DEFAULT_WORK_SECONDS;
   private breakDuration: number = DEFAULT_BREAK_SECONDS;
   private tickCount: number = 0;
+  private deadlineAt: number = 0;
+  private autoStartTimerId: number | null = null;
+  private isCompleting: boolean = false;
   private tabsController: TabsController = new TabsController();
 
   async aboutToAppear(): Promise<void> {
@@ -59,8 +65,11 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.saveCurrentState();
+    this.clearTimerInterval();
+    this.cancelScheduledAutoStart();
     NotificationHelper.cancelOngoing();
-    this.stopTimer();
+    AmbientHelper.stop();
   }
 
   async onPageShow(): Promise<void> {
@@ -125,12 +134,34 @@ struct Index {
     }
   }
 
-  startTimer(): void {
+  private clearTimerInterval(): void {
     if (this.timerId !== null) {
+      clearInterval(this.timerId);
+      this.timerId = null;
+    }
+  }
+
+  private cancelScheduledAutoStart(): void {
+    if (this.autoStartTimerId !== null) {
+      clearTimeout(this.autoStartTimerId);
+      this.autoStartTimerId = null;
+    }
+  }
+
+  private refreshRemainingFromDeadline(): void {
+    if (this.deadlineAt <= 0) {
       return;
     }
+    this.remainingSeconds = TimerHelper.calculateRemainingSeconds(this.deadlineAt, Date.now());
+    this.updateProgress();
+  }
+
+  private beginTimerWithDeadline(deadlineAt: number): void {
+    this.clearTimerInterval();
+    this.deadlineAt = deadlineAt;
     this.isRunning = true;
     this.tickCount = 0;
+    this.refreshRemainingFromDeadline();
     NotificationHelper.publishOngoing(this.remainingSeconds, this.isWorkMode);
     if (this.isWorkMode && this.ambientName !== '') {
       AmbientHelper.start(this.getContext(), this.ambientName);
@@ -140,71 +171,118 @@ struct Index {
     }, 1000);
   }
 
-  stopTimer(): void {
-    if (this.timerId !== null) {
-      clearInterval(this.timerId);
-      this.timerId = null;
+  startTimer(): void {
+    if (this.timerId !== null || this.remainingSeconds <= 0) {
+      return;
     }
+    this.cancelScheduledAutoStart();
+    this.beginTimerWithDeadline(Date.now() + this.remainingSeconds * 1000);
+    this.saveCurrentState();
+  }
+
+  stopTimer(): void {
+    this.refreshRemainingFromDeadline();
+    this.clearTimerInterval();
+    this.cancelScheduledAutoStart();
+    this.deadlineAt = 0;
     this.isRunning = false;
     NotificationHelper.cancelOngoing();
     AmbientHelper.stop();
   }
 
   tick(): void {
-    this.remainingSeconds -= 1;
-    this.updateProgress();
+    if (!this.isRunning || this.deadlineAt <= 0) {
+      return;
+    }
+    this.refreshRemainingFromDeadline();
     this.tickCount += 1;
+
+    if (this.remainingSeconds <= 0) {
+      this.handleTimerComplete();
+      return;
+    }
 
     if (this.tickCount % NOTIFICATION_UPDATE_INTERVAL === 0) {
       NotificationHelper.publishOngoing(this.remainingSeconds, this.isWorkMode);
     }
-
-    if (this.remainingSeconds <= 0) {
-      this.handleTimerComplete();
-    }
   }
 
-  handleTimerComplete(): void {
-    this.stopTimer();
+  private scheduleAutoStart(): void {
+    this.cancelScheduledAutoStart();
+    this.autoStartTimerId = setTimeout(() => {
+      this.autoStartTimerId = null;
+      this.startTimer();
+    }, 2000);
+  }
+
+  async handleTimerComplete(): Promise<void> {
+    if (this.isCompleting) {
+      return;
+    }
+    this.isCompleting = true;
+    const completedWorkMode = this.isWorkMode;
+    const completedDuration = this.totalSeconds;
+    const completedAt = this.deadlineAt > 0 ? this.deadlineAt : Date.now();
+    const previousTodayCount = this.todayCount;
+
+    this.remainingSeconds = 0;
+    this.updateProgress();
+    this.clearTimerInterval();
+    this.deadlineAt = 0;
+    this.isRunning = false;
+    NotificationHelper.cancelOngoing();
+    AmbientHelper.stop();
 
     SoundHelper.play(this.getContext(), this.soundName);
 
-    if (this.isWorkMode) {
+    if (completedWorkMode) {
       this.completedSessions += 1;
-      this.recordSession();
       NotificationHelper.sendEndNotification(true);
       this.switchToBreak();
     } else {
-      this.recordBreakSession();
       NotificationHelper.sendEndNotification(false);
       this.switchToWork();
     }
 
     if (this.autoStartNext) {
-      setTimeout(() => {
-        this.startTimer();
-      }, 2000);
+      this.scheduleAutoStart();
+    }
+
+    try {
+      await this.persistPhaseRecord(completedWorkMode, completedDuration, completedDuration,
+        completedAt, 'completed');
+      await this.loadTodayStats();
+      if (completedWorkMode && previousTodayCount < this.dailyTarget && this.todayCount >= this.dailyTarget) {
+        this.triggerCelebration();
+      }
+      await this.saveCurrentState();
+    } finally {
+      this.isCompleting = false;
     }
   }
 
-  private getTodayStr(): string {
-    const today = new Date();
-    return `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
+  private getDateStr(timestamp: number): string {
+    const date = new Date(timestamp);
+    return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
   }
 
-  recordSession(): void {
-    const prevCount = this.todayCount;
-    PreferencesHelper.saveSessionRecord(this.getContext(), {
-      date: this.getTodayStr(),
-      workSeconds: this.totalSeconds - this.remainingSeconds,
-      completedAt: Date.now(),
-      type: 'work'
-    }).then(async () => {
-      await this.loadTodayStats();
-      if (prevCount < this.dailyTarget && this.todayCount >= this.dailyTarget) {
-        this.triggerCelebration();
-      }
-    });
+  private async persistPhaseRecord(isWorkMode: boolean, actualSeconds: number, plannedSeconds: number,
+    completedAt: number, status: 'completed' | 'abandoned' | 'skipped'): Promise<void> {
+    if (actualSeconds <= 0) {
+      return;
+    }
+    try {
+      await PreferencesHelper.saveSessionRecord(this.getContext(), {
+        date: this.getDateStr(completedAt),
+        workSeconds: Math.min(actualSeconds, plannedSeconds),
+        completedAt: completedAt,
+        type: isWorkMode ? 'work' : 'break',
+        status: status,
+        plannedSeconds: plannedSeconds
+      });
+    } catch {
+      // 单次记录失败不阻塞计时状态切换。
+    }
   }
 
   triggerCelebration(): void {
@@ -213,18 +291,6 @@ struct Index {
     setTimeout(() => {
       this.showCelebration = false;
     }, 4000);
-  }
-
-  recordBreakSession(): void {
-    const breakSeconds = this.totalSeconds - this.remainingSeconds;
-    if (breakSeconds > 0) {
-      PreferencesHelper.saveSessionRecord(this.getContext(), {
-        date: this.getTodayStr(),
-        workSeconds: breakSeconds,
-        completedAt: Date.now(),
-        type: 'break'
-      }).then(() => this.loadTodayStats());
-    }
   }
 
   clearTodayData(): void {
@@ -253,6 +319,7 @@ struct Index {
   onStartPause(): void {
     if (this.isRunning) {
       this.stopTimer();
+      this.saveCurrentState();
     } else {
       this.startTimer();
     }
@@ -262,18 +329,21 @@ struct Index {
     this.stopTimer();
     this.remainingSeconds = this.totalSeconds;
     this.updateProgress();
+    this.saveCurrentState();
   }
 
-  onSkipBreak(): void {
-    this.recordBreakSession();
+  async onSkipBreak(): Promise<void> {
+    const plannedSeconds = this.totalSeconds;
     this.stopTimer();
+    const actualSeconds = Math.max(0, plannedSeconds - this.remainingSeconds);
     SoundHelper.play(this.getContext(), this.soundName);
     this.switchToWork();
     if (this.autoStartNext) {
-      setTimeout(() => {
-        this.startTimer();
-      }, 2000);
+      this.scheduleAutoStart();
     }
+    await this.persistPhaseRecord(false, actualSeconds, plannedSeconds, Date.now(), 'skipped');
+    await this.loadTodayStats();
+    await this.saveCurrentState();
   }
 
   onSkipPhase(): void {
@@ -287,18 +357,18 @@ struct Index {
     }
   }
 
-  onEndEarly(): void {
+  async onEndEarly(): Promise<void> {
+    const plannedSeconds = this.totalSeconds;
     this.stopTimer();
+    const actualSeconds = Math.max(0, plannedSeconds - this.remainingSeconds);
     SoundHelper.play(this.getContext(), this.soundName);
-    this.completedSessions += 1;
-    this.recordSession();
-    NotificationHelper.sendEndNotification(true);
     this.switchToBreak();
     if (this.autoStartNext) {
-      setTimeout(() => {
-        this.startTimer();
-      }, 2000);
+      this.scheduleAutoStart();
     }
+    await this.persistPhaseRecord(true, actualSeconds, plannedSeconds, Date.now(), 'abandoned');
+    await this.loadTodayStats();
+    await this.saveCurrentState();
   }
 
   async saveCurrentState(): Promise<void> {
@@ -309,7 +379,8 @@ struct Index {
         isWorkMode: this.isWorkMode,
         isRunning: this.isRunning,
         completedSessions: this.completedSessions,
-        savedAt: Date.now()
+        savedAt: Date.now(),
+        deadlineAt: this.isRunning ? this.deadlineAt : 0
       });
     } catch {
       // 保存失败静默处理
@@ -317,28 +388,85 @@ struct Index {
   }
 
   async recoverFromBackground(): Promise<void> {
+    this.clearTimerInterval();
+    this.cancelScheduledAutoStart();
+    NotificationHelper.cancelOngoing();
+    AmbientHelper.stop();
+    this.isCompleting = false;
+
     try {
       const state = await PreferencesHelper.loadTimerState(this.getContext());
-      if (state !== null && state.isRunning) {
-        const elapsed = Math.floor((Date.now() - state.savedAt) / 1000);
-        const adjusted = state.remainingSeconds - elapsed;
+      if (state !== null) {
         this.totalSeconds = state.totalSeconds;
         this.isWorkMode = state.isWorkMode;
         this.completedSessions = state.completedSessions;
-        if (adjusted <= 0) {
-          this.remainingSeconds = 0;
-          this.handleTimerComplete();
-        } else {
-          this.remainingSeconds = adjusted;
+
+        if (!state.isRunning) {
           this.isRunning = false;
+          this.deadlineAt = 0;
+          this.remainingSeconds = Math.max(0, Math.min(state.remainingSeconds, state.totalSeconds));
           this.updateProgress();
+          return;
         }
+
+        const now = Date.now();
+        let phaseWorkMode = state.isWorkMode;
+        let phaseDuration = state.totalSeconds;
+        let phaseEndAt = state.deadlineAt !== undefined && state.deadlineAt > 0
+          ? state.deadlineAt
+          : state.savedAt + state.remainingSeconds * 1000;
+        let recoveredPhases = 0;
+
+        while (phaseEndAt <= now && recoveredPhases < MAX_RECOVERED_PHASES) {
+          await this.persistPhaseRecord(phaseWorkMode, phaseDuration, phaseDuration,
+            phaseEndAt, 'completed');
+          if (phaseWorkMode) {
+            this.completedSessions += 1;
+          }
+
+          phaseWorkMode = !phaseWorkMode;
+          phaseDuration = phaseWorkMode ? this.workDuration : this.breakDuration;
+          recoveredPhases += 1;
+
+          if (!this.autoStartNext) {
+            this.isWorkMode = phaseWorkMode;
+            this.totalSeconds = phaseDuration;
+            this.remainingSeconds = phaseDuration;
+            this.isRunning = false;
+            this.deadlineAt = 0;
+            this.updateProgress();
+            await this.loadTodayStats();
+            await this.saveCurrentState();
+            return;
+          }
+          phaseEndAt += phaseDuration * 1000;
+        }
+
+        this.isWorkMode = phaseWorkMode;
+        this.totalSeconds = phaseDuration;
+
+        if (phaseEndAt <= now) {
+          // 长时间未返回时停止自动追赶，避免生成大量无人值守的虚假记录。
+          this.remainingSeconds = phaseDuration;
+          this.isRunning = false;
+          this.deadlineAt = 0;
+          this.updateProgress();
+        } else {
+          this.remainingSeconds = TimerHelper.calculateRemainingSeconds(phaseEndAt, now);
+          this.updateProgress();
+          this.beginTimerWithDeadline(phaseEndAt);
+        }
+
+        await this.loadTodayStats();
+        await this.saveCurrentState();
         return;
       }
     } catch {
       // 恢复失败静默处理
     }
     await this.loadSettings();
+    this.isRunning = false;
+    this.deadlineAt = 0;
     this.totalSeconds = this.isWorkMode ? this.workDuration : this.breakDuration;
     this.remainingSeconds = this.totalSeconds;
     this.updateProgress();
