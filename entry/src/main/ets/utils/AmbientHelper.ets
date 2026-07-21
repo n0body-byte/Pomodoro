@@ -2,6 +2,7 @@ import { media } from '@kit.MediaKit';
 
 let ambientPlayer: media.AVPlayer | null = null;
 let activeAmbient: string = '';
+let activeVolume: number = 0.5;
 
 function loopPlay(context: Context, name: string): void {
   if (ambientPlayer === null || activeAmbient !== name) {
@@ -20,8 +21,13 @@ function loopPlay(context: Context, name: string): void {
 }
 
 export class AmbientHelper {
-  static async start(context: Context, name: string): Promise<void> {
-    if (name === '' || name === activeAmbient) {
+  static async start(context: Context, name: string, volume: number = 0.5): Promise<void> {
+    if (name === '') {
+      return;
+    }
+
+    if (name === activeAmbient && ambientPlayer !== null) {
+      AmbientHelper.setVolume(volume);
       return;
     }
 
@@ -30,11 +36,13 @@ export class AmbientHelper {
     try {
       ambientPlayer = await media.createAVPlayer();
       activeAmbient = name;
+      activeVolume = Math.max(0, Math.min(volume, 1));
 
       ambientPlayer.on('stateChange', (state: string) => {
         if (state === 'initialized') {
           ambientPlayer!.prepare();
         } else if (state === 'prepared') {
+          ambientPlayer!.setVolume(activeVolume);
           ambientPlayer!.play();
         } else if (state === 'completed') {
           ambientPlayer!.stop();
@@ -64,6 +72,13 @@ export class AmbientHelper {
       };
     } catch {
       // 播放失败静默处理
+    }
+  }
+
+  static setVolume(volume: number): void {
+    activeVolume = Math.max(0, Math.min(volume, 1));
+    if (ambientPlayer !== null) {
+      ambientPlayer.setVolume(activeVolume);
     }
   }
 

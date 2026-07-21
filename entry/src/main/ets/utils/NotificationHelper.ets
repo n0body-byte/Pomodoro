@@ -1,5 +1,6 @@
 import { vibrator } from '@kit.SensorServiceKit';
 import { notificationManager } from '@kit.NotificationKit';
+import { common } from '@kit.AbilityKit';
 import {
   VIBRATION_DURATION_MS,
   NOTIFICATION_WORK_END_ID,
@@ -8,13 +9,11 @@ import {
 } from '../common/Constants';
 
 export class NotificationHelper {
-  static async requestPermission(): Promise<void> {
+  static async requestPermission(context: common.UIAbilityContext): Promise<void> {
     try {
       const enabled = await notificationManager.isNotificationEnabled();
       if (!enabled) {
-        await new Promise<void>((resolve) => {
-          notificationManager.requestEnableNotification(() => { resolve(); });
-        });
+        await notificationManager.requestEnableNotification(context);
       }
     } catch { }
   }

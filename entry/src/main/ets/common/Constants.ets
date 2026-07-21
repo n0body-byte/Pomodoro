@@ -14,6 +14,20 @@ export const PREF_KEY_TIMER_STATE = 'timerState';
 export const PREF_KEY_THEME = 'theme';
 export const PREF_KEY_SOUND = 'sound';
 export const PREF_KEY_AMBIENT = 'ambient';
+export const PREF_KEY_LONG_BREAK_DURATION = 'longBreakDuration';
+export const PREF_KEY_LONG_BREAK_INTERVAL = 'longBreakInterval';
+export const PREF_KEY_AUTO_START_WORK = 'autoStartWork';
+export const PREF_KEY_AUTO_START_BREAK = 'autoStartBreak';
+export const PREF_KEY_TIMER_PRESET = 'timerPreset';
+export const PREF_KEY_SOUND_ENABLED = 'soundEnabled';
+export const PREF_KEY_SOUND_VOLUME = 'soundVolume';
+export const PREF_KEY_AMBIENT_VOLUME = 'ambientVolume';
+export const PREF_KEY_TASK_CONTEXT = 'taskContext';
+
+export const DEFAULT_LONG_BREAK_SECONDS = 15 * 60;
+export const DEFAULT_LONG_BREAK_INTERVAL = 4;
+export const DEFAULT_SOUND_VOLUME = 0.8;
+export const DEFAULT_AMBIENT_VOLUME = 0.5;
 
 export const VIBRATION_DURATION_MS = 500;
 

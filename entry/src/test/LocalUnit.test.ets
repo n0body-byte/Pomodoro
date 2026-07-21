@@ -1,6 +1,7 @@
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
 import { PreferencesHelper, SessionRecord } from '../main/ets/utils/PreferencesHelper';
 import { TimerHelper } from '../main/ets/utils/TimerHelper';
+import { TimerPlanHelper } from '../main/ets/utils/TimerPlanHelper';
 
 export default function localUnitTest() {
   describe('localUnitTest', () => {
@@ -43,6 +44,21 @@ export default function localUnitTest() {
       expect(PreferencesHelper.isCompletedWorkRecord(legacyRecord)).assertTrue();
       expect(PreferencesHelper.isCompletedWorkRecord(abandonedRecord)).assertFalse();
       expect(PreferencesHelper.isCompletedWorkRecord(breakRecord)).assertFalse();
+    });
+
+    it('longBreakCadence', 0, () => {
+      expect(TimerPlanHelper.isLongBreak(0, 4)).assertFalse();
+      expect(TimerPlanHelper.isLongBreak(3, 4)).assertFalse();
+      expect(TimerPlanHelper.isLongBreak(4, 4)).assertTrue();
+      expect(TimerPlanHelper.getBreakDuration(4, 4, 300, 900)).assertEqual(900);
+      expect(TimerPlanHelper.getBreakDuration(5, 4, 300, 900)).assertEqual(300);
+    });
+
+    it('separateAutoStartRules', 0, () => {
+      expect(TimerPlanHelper.shouldAutoStart(true, true, false)).assertTrue();
+      expect(TimerPlanHelper.shouldAutoStart(true, false, true)).assertFalse();
+      expect(TimerPlanHelper.shouldAutoStart(false, false, true)).assertTrue();
+      expect(TimerPlanHelper.shouldAutoStart(false, true, false)).assertFalse();
     });
   });
 }

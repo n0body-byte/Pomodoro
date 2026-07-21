@@ -1,15 +1,17 @@
-import { ConfigurationConstant } from '@kit.AbilityKit';
+import { ConfigurationConstant, common } from '@kit.AbilityKit';
 import { CircularProgress } from '../components/CircularProgress';
 import { TimerControls } from '../components/TimerControls';
 import { CelebrationOverlay } from '../components/CelebrationOverlay';
-import { PreferencesHelper } from '../utils/PreferencesHelper';
+import { PreferencesHelper, TaskContext } from '../utils/PreferencesHelper';
 import { SoundHelper } from '../utils/SoundHelper';
 import { AmbientHelper } from '../utils/AmbientHelper';
 import { NotificationHelper } from '../utils/NotificationHelper';
 import { TimerHelper } from '../utils/TimerHelper';
+import { TimerPlanHelper } from '../utils/TimerPlanHelper';
 import { Settings } from '../views/Settings';
 import { Statistics } from '../views/Statistics';
 import { Achievements } from '../views/Achievements';
+import { History } from '../views/History';
 import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
@@ -35,26 +37,53 @@ struct Index {
   @State currentTabIndex: number = 0;
   @State isDarkMode: boolean = false;
   @State soundName: string = 'bell';
-  @State autoStartNext: boolean = false;
   @State ambientName: string = '';
   @State showCelebration: boolean = false;
+  @State autoStartWork: boolean = false;
+  @State autoStartBreak: boolean = false;
+  @State isLongBreak: boolean = false;
+  @State soundEnabled: boolean = true;
+  @State soundVolume: number = 0.8;
+  @State ambientVolume: number = 0.5;
+  @State currentTask: string = '';
+  @State currentProject: string = '';
+  @State currentTag: string = '';
+  @State currentNote: string = '';
+  @State estimatedPomodoros: number = 1;
+  @State currentTaskCompleted: number = 0;
+  @State showTaskEditor: boolean = false;
+  @State showEndEarlyDialog: boolean = false;
+  @State taskDraft: string = '';
+  @State projectDraft: string = '';
+  @State tagDraft: string = '';
+  @State noteDraft: string = '';
+  @State estimateDraft: number = 1;
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
   private breakDuration: number = DEFAULT_BREAK_SECONDS;
+  private longBreakDuration: number = 15 * 60;
+  private longBreakInterval: number = 4;
   private tickCount: number = 0;
   private deadlineAt: number = 0;
   private autoStartTimerId: number | null = null;
+  private ambientPreviewTimerId: number | null = null;
   private isCompleting: boolean = false;
   private tabsController: TabsController = new TabsController();
 
   async aboutToAppear(): Promise<void> {
     const ctx = this.getContext();
-    await NotificationHelper.requestPermission();
+    await NotificationHelper.requestPermission(ctx as common.UIAbilityContext);
     this.isDarkMode = await PreferencesHelper.loadTheme(ctx);
     this.soundName = await PreferencesHelper.loadSound(ctx);
-    this.autoStartNext = await PreferencesHelper.loadAutoStart(ctx);
     this.ambientName = await PreferencesHelper.loadAmbient(ctx);
+    this.autoStartWork = await PreferencesHelper.loadAutoStartWork(ctx);
+    this.autoStartBreak = await PreferencesHelper.loadAutoStartBreak(ctx);
+    this.soundEnabled = await PreferencesHelper.loadSoundEnabled(ctx);
+    this.soundVolume = await PreferencesHelper.loadSoundVolume(ctx);
+    this.ambientVolume = await PreferencesHelper.loadAmbientVolume(ctx);
+    const taskContext = await PreferencesHelper.loadTaskContext(ctx);
+    this.applyTaskContext(taskContext);
     this.applyColorMode();
     await this.loadSettings();
     this.completedSessions = 0;
@@ -70,6 +99,7 @@ struct Index {
     this.cancelScheduledAutoStart();
     NotificationHelper.cancelOngoing();
     AmbientHelper.stop();
+    SoundHelper.release();
   }
 
   async onPageShow(): Promise<void> {
@@ -92,6 +122,64 @@ struct Index {
     }
   }
 
+  private applyTaskContext(taskContext: TaskContext): void {
+    this.currentTask = taskContext.task;
+    this.currentProject = taskContext.project;
+    this.currentTag = taskContext.tag;
+    this.currentNote = taskContext.note;
+    this.estimatedPomodoros = Math.max(1, taskContext.estimatedPomodoros || 1);
+  }
+
+  private async saveTaskContext(): Promise<void> {
+    this.currentTask = this.taskDraft.trim();
+    this.currentProject = this.projectDraft.trim();
+    this.currentTag = this.tagDraft.trim();
+    this.currentNote = this.noteDraft.trim();
+    this.estimatedPomodoros = this.estimateDraft;
+    await PreferencesHelper.saveTaskContext(this.getContext(), {
+      task: this.currentTask.trim(),
+      project: this.currentProject.trim(),
+      tag: this.currentTag.trim(),
+      note: this.currentNote.trim(),
+      estimatedPomodoros: this.estimatedPomodoros
+    });
+    this.currentTask = this.currentTask.trim();
+    this.currentProject = this.currentProject.trim();
+    this.currentTag = this.currentTag.trim();
+    this.currentNote = this.currentNote.trim();
+    this.showTaskEditor = false;
+    await this.loadTodayStats();
+  }
+
+  private openTaskEditor(): void {
+    this.taskDraft = this.currentTask;
+    this.projectDraft = this.currentProject;
+    this.tagDraft = this.currentTag;
+    this.noteDraft = this.currentNote;
+    this.estimateDraft = this.estimatedPomodoros;
+    this.showTaskEditor = true;
+  }
+
+  private playSelectedSound(sound: string = this.soundName): void {
+    if (this.soundEnabled && this.soundVolume > 0) {
+      SoundHelper.play(this.getContext(), sound, this.soundVolume);
+    }
+  }
+
+  private previewAmbient(name: string): void {
+    if (this.isRunning || name === '') {
+      return;
+    }
+    if (this.ambientPreviewTimerId !== null) {
+      clearTimeout(this.ambientPreviewTimerId);
+    }
+    AmbientHelper.start(this.getContext(), name, this.ambientVolume);
+    this.ambientPreviewTimerId = setTimeout(() => {
+      this.ambientPreviewTimerId = null;
+      AmbientHelper.stop();
+    }, 3000);
+  }
+
   private onThemeChange(isDark: boolean): void {
     this.isDarkMode = isDark;
     this.applyColorMode();
@@ -107,10 +195,14 @@ struct Index {
       this.workDuration = await PreferencesHelper.loadWorkDuration(this.getContext());
       this.breakDuration = await PreferencesHelper.loadBreakDuration(this.getContext());
       this.dailyTarget = await PreferencesHelper.loadDailyTarget(this.getContext());
+      this.longBreakDuration = await PreferencesHelper.loadLongBreakDuration(this.getContext());
+      this.longBreakInterval = await PreferencesHelper.loadLongBreakInterval(this.getContext());
     } catch {
       this.workDuration = DEFAULT_WORK_SECONDS;
       this.breakDuration = DEFAULT_BREAK_SECONDS;
       this.dailyTarget = DEFAULT_DAILY_TARGET;
+      this.longBreakDuration = 15 * 60;
+      this.longBreakInterval = 4;
     }
   }
 
@@ -119,10 +211,13 @@ struct Index {
       this.todayCount = await PreferencesHelper.getTodaySessions(this.getContext());
       this.todayWorkSeconds = await PreferencesHelper.getTodayWorkSeconds(this.getContext());
       this.todayBreakSeconds = await PreferencesHelper.getTodayBreakSeconds(this.getContext());
+      this.currentTaskCompleted = await PreferencesHelper.getTaskCompletedSessions(
+        this.getContext(), this.currentTask, this.currentProject);
     } catch {
       this.todayCount = 0;
       this.todayWorkSeconds = 0;
       this.todayBreakSeconds = 0;
+      this.currentTaskCompleted = 0;
     }
   }
 
@@ -164,7 +259,7 @@ struct Index {
     this.refreshRemainingFromDeadline();
     NotificationHelper.publishOngoing(this.remainingSeconds, this.isWorkMode);
     if (this.isWorkMode && this.ambientName !== '') {
-      AmbientHelper.start(this.getContext(), this.ambientName);
+      AmbientHelper.start(this.getContext(), this.ambientName, this.ambientVolume);
     }
     this.timerId = setInterval(() => {
       this.tick();
@@ -233,7 +328,7 @@ struct Index {
     NotificationHelper.cancelOngoing();
     AmbientHelper.stop();
 
-    SoundHelper.play(this.getContext(), this.soundName);
+    this.playSelectedSound();
 
     if (completedWorkMode) {
       this.completedSessions += 1;
@@ -244,7 +339,7 @@ struct Index {
       this.switchToWork();
     }
 
-    if (this.autoStartNext) {
+    if (TimerPlanHelper.shouldAutoStart(completedWorkMode, this.autoStartBreak, this.autoStartWork)) {
       this.scheduleAutoStart();
     }
 
@@ -267,27 +362,35 @@ struct Index {
   }
 
   private async persistPhaseRecord(isWorkMode: boolean, actualSeconds: number, plannedSeconds: number,
-    completedAt: number, status: 'completed' | 'abandoned' | 'skipped'): Promise<void> {
+    completedAt: number, status: 'completed' | 'abandoned' | 'skipped'): Promise<boolean> {
     if (actualSeconds <= 0) {
-      return;
+      return false;
     }
     try {
       await PreferencesHelper.saveSessionRecord(this.getContext(), {
         date: this.getDateStr(completedAt),
         workSeconds: Math.min(actualSeconds, plannedSeconds),
+        startedAt: completedAt - Math.min(actualSeconds, plannedSeconds) * 1000,
         completedAt: completedAt,
         type: isWorkMode ? 'work' : 'break',
         status: status,
-        plannedSeconds: plannedSeconds
+        plannedSeconds: plannedSeconds,
+        task: this.currentTask,
+        project: this.currentProject,
+        tag: this.currentTag,
+        note: this.currentNote,
+        source: 'timer'
       });
+      return true;
     } catch {
       // 单次记录失败不阻塞计时状态切换。
+      return false;
     }
   }
 
   triggerCelebration(): void {
     this.showCelebration = true;
-    SoundHelper.play(this.getContext(), 'celebration');
+    this.playSelectedSound('celebration');
     setTimeout(() => {
       this.showCelebration = false;
     }, 4000);
@@ -304,6 +407,7 @@ struct Index {
 
   switchToWork(): void {
     this.isWorkMode = true;
+    this.isLongBreak = false;
     this.totalSeconds = this.workDuration;
     this.remainingSeconds = this.workDuration;
     this.updateProgress();
@@ -311,8 +415,10 @@ struct Index {
 
   switchToBreak(): void {
     this.isWorkMode = false;
-    this.totalSeconds = this.breakDuration;
-    this.remainingSeconds = this.breakDuration;
+    this.isLongBreak = TimerPlanHelper.isLongBreak(this.completedSessions, this.longBreakInterval);
+    this.totalSeconds = TimerPlanHelper.getBreakDuration(this.completedSessions, this.longBreakInterval,
+      this.breakDuration, this.longBreakDuration);
+    this.remainingSeconds = this.totalSeconds;
     this.updateProgress();
   }
 
@@ -336,13 +442,15 @@ struct Index {
     const plannedSeconds = this.totalSeconds;
     this.stopTimer();
     const actualSeconds = Math.max(0, plannedSeconds - this.remainingSeconds);
-    SoundHelper.play(this.getContext(), this.soundName);
+    this.playSelectedSound();
     this.switchToWork();
-    if (this.autoStartNext) {
+    if (this.autoStartWork) {
       this.scheduleAutoStart();
     }
-    await this.persistPhaseRecord(false, actualSeconds, plannedSeconds, Date.now(), 'skipped');
-    await this.loadTodayStats();
+    const saved = await this.persistPhaseRecord(false, actualSeconds, plannedSeconds, Date.now(), 'skipped');
+    if (saved) {
+      this.todayBreakSeconds += actualSeconds;
+    }
     await this.saveCurrentState();
   }
 
@@ -351,24 +459,61 @@ struct Index {
       return;
     }
     if (this.isWorkMode) {
-      this.onEndEarly();
+      this.stopTimer();
+      this.showEndEarlyDialog = true;
     } else {
       this.onSkipBreak();
     }
   }
 
-  async onEndEarly(): Promise<void> {
-    const plannedSeconds = this.totalSeconds;
-    this.stopTimer();
-    const actualSeconds = Math.max(0, plannedSeconds - this.remainingSeconds);
-    SoundHelper.play(this.getContext(), this.soundName);
-    this.switchToBreak();
-    if (this.autoStartNext) {
-      this.scheduleAutoStart();
+  private cancelEndEarly(): void {
+    this.showEndEarlyDialog = false;
+    this.startTimer();
+  }
+
+  async finishEarly(action: string): Promise<void> {
+    if (this.isCompleting) {
+      return;
     }
-    await this.persistPhaseRecord(true, actualSeconds, plannedSeconds, Date.now(), 'abandoned');
-    await this.loadTodayStats();
-    await this.saveCurrentState();
+    this.isCompleting = true;
+    const plannedSeconds = this.totalSeconds;
+    const actualSeconds = Math.max(0, plannedSeconds - this.remainingSeconds);
+    const previousTodayCount = this.todayCount;
+    this.showEndEarlyDialog = false;
+    try {
+      if (action === 'completed') {
+        this.completedSessions += 1;
+        // “按完成计算”代表将本轮视为完整番茄，统计时计入全部计划时长。
+        const saved = await this.persistPhaseRecord(
+          true, plannedSeconds, plannedSeconds, Date.now(), 'completed');
+        if (saved) {
+          this.todayWorkSeconds += plannedSeconds;
+          this.todayCount += 1;
+          if (this.currentTask.length > 0) {
+            this.currentTaskCompleted += 1;
+          }
+        }
+      } else if (action === 'partial') {
+        const saved = await this.persistPhaseRecord(
+          true, actualSeconds, plannedSeconds, Date.now(), 'abandoned');
+        if (saved) {
+          this.todayWorkSeconds += actualSeconds;
+        }
+      }
+      if (action !== 'discard') {
+        this.playSelectedSound();
+      }
+      this.switchToBreak();
+      if (this.autoStartBreak) {
+        this.scheduleAutoStart();
+      }
+      if (action === 'completed' && previousTodayCount < this.dailyTarget && this.todayCount >= this.dailyTarget) {
+        this.triggerCelebration();
+      }
+      await this.saveCurrentState();
+    } finally {
+      this.isCompleting = false;
+    }
   }
 
   async saveCurrentState(): Promise<void> {
@@ -380,7 +525,8 @@ struct Index {
         isRunning: this.isRunning,
         completedSessions: this.completedSessions,
         savedAt: Date.now(),
-        deadlineAt: this.isRunning ? this.deadlineAt : 0
+        deadlineAt: this.isRunning ? this.deadlineAt : 0,
+        isLongBreak: this.isLongBreak
       });
     } catch {
       // 保存失败静默处理
@@ -399,6 +545,7 @@ struct Index {
       if (state !== null) {
         this.totalSeconds = state.totalSeconds;
         this.isWorkMode = state.isWorkMode;
+        this.isLongBreak = state.isLongBreak || false;
         this.completedSessions = state.completedSessions;
 
         if (!state.isRunning) {
@@ -424,12 +571,21 @@ struct Index {
             this.completedSessions += 1;
           }
 
+          const shouldContinue = TimerPlanHelper.shouldAutoStart(
+            phaseWorkMode, this.autoStartBreak, this.autoStartWork);
           phaseWorkMode = !phaseWorkMode;
-          phaseDuration = phaseWorkMode ? this.workDuration : this.breakDuration;
+          if (phaseWorkMode) {
+            phaseDuration = this.workDuration;
+          } else {
+            phaseDuration = TimerPlanHelper.getBreakDuration(this.completedSessions, this.longBreakInterval,
+              this.breakDuration, this.longBreakDuration);
+          }
           recoveredPhases += 1;
 
-          if (!this.autoStartNext) {
+          if (!shouldContinue) {
             this.isWorkMode = phaseWorkMode;
+            this.isLongBreak = !phaseWorkMode &&
+              TimerPlanHelper.isLongBreak(this.completedSessions, this.longBreakInterval);
             this.totalSeconds = phaseDuration;
             this.remainingSeconds = phaseDuration;
             this.isRunning = false;
@@ -443,6 +599,8 @@ struct Index {
         }
 
         this.isWorkMode = phaseWorkMode;
+        this.isLongBreak = !phaseWorkMode &&
+          TimerPlanHelper.isLongBreak(this.completedSessions, this.longBreakInterval);
         this.totalSeconds = phaseDuration;
 
         if (phaseEndAt <= now) {
@@ -472,33 +630,6 @@ struct Index {
     this.updateProgress();
   }
 
-  @Builder
-  durationDisplay(totalSeconds: number) {
-    if (totalSeconds <= 0) {
-      Row({ space: 2 }) {
-        Text('0')
-          .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
-        Text('m')
-          .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_tertiary'))
-      }
-    } else {
-      Row({ space: 2 }) {
-        if (Math.floor(totalSeconds / 3600) > 0) {
-          Text(`${Math.floor(totalSeconds / 3600)}`)
-            .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
-          Text('h')
-            .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_tertiary'))
-        }
-        if (Math.floor((totalSeconds % 3600) / 60) > 0 || Math.floor(totalSeconds / 3600) === 0) {
-          Text(`${Math.floor((totalSeconds % 3600) / 60)}`)
-            .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
-          Text('m')
-            .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_tertiary'))
-        }
-      }
-    }
-  }
-
   private getCapsuleIndices(): number[] {
     const arr: number[] = [];
     for (let i = 0; i < this.dailyTarget; i++) {
@@ -509,7 +640,8 @@ struct Index {
 
   private async onNavigateToTimer(): Promise<void> {
     await this.loadSettings();
-    this.autoStartNext = await PreferencesHelper.loadAutoStart(this.getContext());
+    this.autoStartWork = await PreferencesHelper.loadAutoStartWork(this.getContext());
+    this.autoStartBreak = await PreferencesHelper.loadAutoStartBreak(this.getContext());
     // 仅在初始状态（未曾开始或刚完成复位）时应用新设置，暂停中的计时不受影响
     if (!this.isRunning && this.remainingSeconds === this.totalSeconds) {
       this.totalSeconds = this.isWorkMode ? this.workDuration : this.breakDuration;
@@ -578,8 +710,26 @@ struct Index {
       Image($r('app.media.achievement'))
         .width(18)
         .height(18)
-        .fillColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+        .fillColor(this.currentTabIndex === 4 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
       Text('成就')
+        .fontSize(10)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.currentTabIndex === 4 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+    }
+    .alignItems(HorizontalAlign.Center)
+    .justifyContent(FlexAlign.Center)
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  tabBarHistory() {
+    Column({ space: 1 }) {
+      Image($r('app.media.history'))
+        .width(18)
+        .height(18)
+        .fillColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+      Text('历史')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
@@ -588,6 +738,92 @@ struct Index {
     .justifyContent(FlexAlign.Center)
     .width('100%')
     .height('100%')
+  }
+
+  @Builder
+  taskEditorOverlay() {
+    if (this.showTaskEditor) {
+      Column() {
+        Column({ space: 12 }) {
+          Text('设置本轮任务')
+            .fontSize(20).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          TextInput({ text: this.taskDraft, placeholder: '这轮要完成什么？' })
+            .height(44).backgroundColor($r('app.color.ring_track'))
+            .onChange((value: string) => this.taskDraft = value)
+          Row({ space: 8 }) {
+            TextInput({ text: this.projectDraft, placeholder: '项目' })
+              .layoutWeight(1).height(42).backgroundColor($r('app.color.ring_track'))
+              .onChange((value: string) => this.projectDraft = value)
+            TextInput({ text: this.tagDraft, placeholder: '标签' })
+              .layoutWeight(1).height(42).backgroundColor($r('app.color.ring_track'))
+              .onChange((value: string) => this.tagDraft = value)
+          }
+          TextInput({ text: this.noteDraft, placeholder: '本轮备注（可选）' })
+            .height(42).backgroundColor($r('app.color.ring_track'))
+            .onChange((value: string) => this.noteDraft = value)
+          Row() {
+            Text('预计番茄数').fontSize(13).fontColor($r('app.color.text_secondary'))
+            Blank()
+            Button('-').width(32).height(32).borderRadius(16)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.estimateDraft = Math.max(1, this.estimateDraft - 1))
+            Text(`${this.estimateDraft}`).width(46).textAlign(TextAlign.Center)
+              .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.primary_red'))
+            Button('+').width(32).height(32).borderRadius(16)
+              .backgroundColor($r('app.color.primary_red')).fontColor(Color.White)
+              .onClick(() => this.estimateDraft = Math.min(20, this.estimateDraft + 1))
+          }
+          Row({ space: 10 }) {
+            Button('取消').layoutWeight(1).height(42)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.showTaskEditor = false)
+            Button('保存').layoutWeight(1).height(42)
+              .backgroundColor($r('app.color.primary_red')).fontColor(Color.White)
+              .onClick(() => this.saveTaskContext())
+          }
+        }
+        .width('88%').padding(18)
+        .backgroundColor($r('app.color.surface')).borderRadius(20)
+      }
+      .width('100%').height('100%')
+      .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+      .backgroundColor('#88000000').zIndex(20)
+    }
+  }
+
+  @Builder
+  endEarlyOverlay() {
+    if (this.showEndEarlyDialog) {
+      Column() {
+        Column({ space: 12 }) {
+          Text('提前结束本轮？')
+            .fontSize(20).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+          Text('选择如何处理已经专注的时间')
+            .fontSize(12).fontColor($r('app.color.text_tertiary'))
+          Button('按完成计算')
+            .width('100%').height(42).backgroundColor($r('app.color.primary_red')).fontColor(Color.White)
+            .onClick(() => this.finishEarly('completed'))
+          Button('保存部分专注')
+            .width('100%').height(42).backgroundColor($r('app.color.primary_green')).fontColor(Color.White)
+            .onClick(() => this.finishEarly('partial'))
+          Button('放弃，不记录')
+            .width('100%').height(42).backgroundColor($r('app.color.ring_track'))
+            .fontColor($r('app.color.text_secondary'))
+            .onClick(() => this.finishEarly('discard'))
+          Button('继续计时')
+            .width('100%').height(36).backgroundColor(Color.Transparent)
+            .fontColor($r('app.color.text_tertiary'))
+            .onClick(() => this.cancelEndEarly())
+        }
+        .width('82%').padding(18)
+        .backgroundColor($r('app.color.surface')).borderRadius(20)
+      }
+      .width('100%').height('100%')
+      .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+      .backgroundColor('#88000000').zIndex(21)
+    }
   }
 
   @Builder
@@ -647,13 +883,39 @@ struct Index {
       .borderRadius(18)
       .border({ width: 1, color: $r('app.color.card_border') })
 
+      Row({ space: 10 }) {
+        Column({ space: 3 }) {
+          Text(this.currentTask.length > 0 ? this.currentTask : '设置本轮任务')
+            .fontSize(14).fontWeight(FontWeight.Bold)
+            .fontColor(this.currentTask.length > 0 ? $r('app.color.text_primary') : $r('app.color.primary_red'))
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.currentTask.length > 0) {
+            Text(`${this.currentProject.length > 0 ? this.currentProject : '无项目'}${this.currentTag.length > 0 ? ` · #${this.currentTag}` : ''} · ${this.currentTaskCompleted}/${this.estimatedPomodoros}`)
+              .fontSize(10).fontColor($r('app.color.text_tertiary'))
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Button(this.currentTask.length > 0 ? '修改' : '+ 添加')
+          .height(30).fontSize(11).borderRadius(15)
+          .backgroundColor($r('app.color.ring_track'))
+          .fontColor($r('app.color.text_secondary'))
+          .onClick(() => this.openTaskEditor())
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .margin({ top: 8 })
+      .backgroundColor($r('app.color.surface'))
+      .borderRadius(14)
+      .border({ width: 1, color: $r('app.color.card_border') })
+
       // 环形计时区
       Column({ space: 0 }) {
         CircularProgress({
           progress: this.progressValue,
           remainingSeconds: this.remainingSeconds,
           totalSeconds: this.totalSeconds,
-          isWorkMode: this.isWorkMode
+          isWorkMode: this.isWorkMode,
+          isLongBreak: this.isLongBreak
         })
 
         TimerControls({
@@ -681,7 +943,10 @@ struct Index {
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.focus_color'))
         }
-        this.durationDisplay(this.todayWorkSeconds)
+        DurationDisplay({
+          totalSeconds: this.todayWorkSeconds +
+            (this.isWorkMode ? Math.max(0, this.totalSeconds - this.remainingSeconds) : 0)
+        })
       }
       .layoutWeight(1)
       .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -701,7 +966,10 @@ struct Index {
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.rest_color'))
         }
-        this.durationDisplay(this.todayBreakSeconds)
+        DurationDisplay({
+          totalSeconds: this.todayBreakSeconds +
+            (!this.isWorkMode ? Math.max(0, this.totalSeconds - this.remainingSeconds) : 0)
+        })
       }
       .layoutWeight(1)
       .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -721,6 +989,8 @@ struct Index {
       show: this.showCelebration,
       onDismiss: () => { this.showCelebration = false; }
     })
+    this.taskEditorOverlay()
+    this.endEarlyOverlay()
     }
   }
 
@@ -736,6 +1006,9 @@ struct Index {
           isDarkMode: this.isDarkMode,
           soundName: this.soundName,
           ambientName: this.ambientName,
+          soundEnabled: this.soundEnabled,
+          soundVolume: this.soundVolume,
+          ambientVolume: this.ambientVolume,
           onThemeChange: (isDark: boolean) => this.onThemeChange(isDark),
           onSoundChange: (sound: string) => {
             this.soundName = sound;
@@ -744,7 +1017,27 @@ struct Index {
           onAmbientChange: (ambient: string) => {
             this.ambientName = ambient;
             PreferencesHelper.saveAmbient(this.getContext(), ambient);
+            if (this.isRunning && this.isWorkMode) {
+              AmbientHelper.stop().then(() => {
+                if (ambient !== '') AmbientHelper.start(this.getContext(), ambient, this.ambientVolume);
+              });
+            }
           },
+          onSoundEnabledChange: (enabled: boolean) => {
+            this.soundEnabled = enabled;
+            PreferencesHelper.saveSoundEnabled(this.getContext(), enabled);
+          },
+          onSoundVolumeChange: (volume: number) => {
+            this.soundVolume = volume;
+            PreferencesHelper.saveSoundVolume(this.getContext(), volume);
+          },
+          onAmbientVolumeChange: (volume: number) => {
+            this.ambientVolume = volume;
+            AmbientHelper.setVolume(volume);
+            PreferencesHelper.saveAmbientVolume(this.getContext(), volume);
+          },
+          onSoundPreview: (sound: string) => this.playSelectedSound(sound),
+          onAmbientPreview: (ambient: string) => this.previewAmbient(ambient),
           onSaved: async () => {
             await this.onNavigateToTimer();
             this.currentTabIndex = 0;
@@ -755,12 +1048,20 @@ struct Index {
       .tabBar(this.tabBarSettings)
 
       TabContent() {
-        Statistics()
+        Statistics({ active: this.currentTabIndex === 2 })
       }
       .tabBar(this.tabBarStatistics)
 
       TabContent() {
-        Achievements({ active: this.currentTabIndex === 3 })
+        History({
+          active: this.currentTabIndex === 3,
+          onChanged: () => this.loadTodayStats()
+        })
+      }
+      .tabBar(this.tabBarHistory)
+
+      TabContent() {
+        Achievements({ active: this.currentTabIndex === 4 })
       }
       .tabBar(this.tabBarAchievements)
     }
@@ -776,5 +1077,41 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.background'))
+  }
+}
+
+@Component
+struct DurationDisplay {
+  @Prop totalSeconds: number = 0;
+
+  build() {
+    Row({ space: 2 }) {
+      if (Math.floor(this.totalSeconds / 3600) > 0) {
+        Text(`${Math.floor(this.totalSeconds / 3600)}`)
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+        Text('h')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_tertiary'))
+      }
+      Text(`${Math.floor((this.totalSeconds % 3600) / 60)}`)
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+      Text('m')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_tertiary'))
+      Text(`${this.totalSeconds % 60}`)
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+      Text('s')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_tertiary'))
+    }
   }
 }

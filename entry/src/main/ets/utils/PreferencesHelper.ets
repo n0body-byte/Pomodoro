@@ -10,18 +10,46 @@ import {
   PREF_KEY_THEME,
   PREF_KEY_SOUND,
   PREF_KEY_AMBIENT,
+  PREF_KEY_LONG_BREAK_DURATION,
+  PREF_KEY_LONG_BREAK_INTERVAL,
+  PREF_KEY_AUTO_START_WORK,
+  PREF_KEY_AUTO_START_BREAK,
+  PREF_KEY_TIMER_PRESET,
+  PREF_KEY_SOUND_ENABLED,
+  PREF_KEY_SOUND_VOLUME,
+  PREF_KEY_AMBIENT_VOLUME,
+  PREF_KEY_TASK_CONTEXT,
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
-  DEFAULT_DAILY_TARGET
+  DEFAULT_DAILY_TARGET,
+  DEFAULT_LONG_BREAK_SECONDS,
+  DEFAULT_LONG_BREAK_INTERVAL,
+  DEFAULT_SOUND_VOLUME,
+  DEFAULT_AMBIENT_VOLUME
 } from '../common/Constants';
 
 export interface SessionRecord {
+  id?: string;
   date: string;
   workSeconds: number;
+  startedAt?: number;
   completedAt: number;
   type?: 'work' | 'break';
   status?: 'completed' | 'abandoned' | 'skipped';
   plannedSeconds?: number;
+  task?: string;
+  project?: string;
+  tag?: string;
+  note?: string;
+  source?: 'timer' | 'manual';
+}
+
+export interface TaskContext {
+  task: string;
+  project: string;
+  tag: string;
+  note: string;
+  estimatedPomodoros: number;
 }
 
 export interface TimerState {
@@ -32,6 +60,7 @@ export interface TimerState {
   completedSessions: number;
   savedAt: number;
   deadlineAt?: number;
+  isLongBreak?: boolean;
 }
 
 export interface DailyStats {
@@ -40,6 +69,13 @@ export interface DailyStats {
 }
 
 export class PreferencesHelper {
+  private static getRecordKey(record: SessionRecord): string {
+    if (record.id !== undefined && record.id.length > 0) {
+      return record.id;
+    }
+    return `${record.completedAt}-${record.type === 'break' ? 'break' : 'work'}`;
+  }
+
   static async saveWorkDuration(context: Context, seconds: number): Promise<void> {
     const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
     await prefs.put(PREF_KEY_WORK_DURATION, seconds);
@@ -134,6 +170,51 @@ export class PreferencesHelper {
     } catch {
       return [];
     }
+  }
+
+  static async updateSessionRecord(context: Context, record: SessionRecord): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    const raw = await prefs.get(PREF_KEY_SESSION_HISTORY, '[]');
+    const history = typeof raw === 'string' && raw.length > 0
+      ? JSON.parse(raw) as SessionRecord[] : [];
+    const recordKey = PreferencesHelper.getRecordKey(record);
+    let replaced = false;
+    const updated: SessionRecord[] = [];
+    for (const item of history) {
+      if (PreferencesHelper.getRecordKey(item) === recordKey) {
+        updated.push(record);
+        replaced = true;
+      } else {
+        updated.push(item);
+      }
+    }
+    if (!replaced) {
+      updated.push(record);
+    }
+    await prefs.put(PREF_KEY_SESSION_HISTORY, JSON.stringify(updated));
+    await prefs.flush();
+  }
+
+  static async deleteSessionRecord(context: Context, record: SessionRecord): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    const raw = await prefs.get(PREF_KEY_SESSION_HISTORY, '[]');
+    const history = typeof raw === 'string' && raw.length > 0
+      ? JSON.parse(raw) as SessionRecord[] : [];
+    const recordKey = PreferencesHelper.getRecordKey(record);
+    const updated = history.filter((item: SessionRecord) =>
+      PreferencesHelper.getRecordKey(item) !== recordKey);
+    await prefs.put(PREF_KEY_SESSION_HISTORY, JSON.stringify(updated));
+    await prefs.flush();
+  }
+
+  static async getTaskCompletedSessions(context: Context, task: string, project: string): Promise<number> {
+    if (task.length === 0) {
+      return 0;
+    }
+    const history = await PreferencesHelper.loadSessionHistory(context);
+    return history.filter((record: SessionRecord) =>
+      PreferencesHelper.isCompletedWorkRecord(record) &&
+      (record.task || '') === task && (record.project || '') === project).length;
   }
 
   static async clearTodaySessions(context: Context): Promise<void> {
@@ -355,6 +436,148 @@ export class PreferencesHelper {
       return null;
     } catch {
       return null;
+    }
+  }
+
+  static async saveLongBreakDuration(context: Context, seconds: number): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_LONG_BREAK_DURATION, seconds);
+    await prefs.flush();
+  }
+
+  static async loadLongBreakDuration(context: Context): Promise<number> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_LONG_BREAK_DURATION, DEFAULT_LONG_BREAK_SECONDS) as number;
+    } catch {
+      return DEFAULT_LONG_BREAK_SECONDS;
+    }
+  }
+
+  static async saveLongBreakInterval(context: Context, count: number): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_LONG_BREAK_INTERVAL, count);
+    await prefs.flush();
+  }
+
+  static async loadLongBreakInterval(context: Context): Promise<number> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_LONG_BREAK_INTERVAL, DEFAULT_LONG_BREAK_INTERVAL) as number;
+    } catch {
+      return DEFAULT_LONG_BREAK_INTERVAL;
+    }
+  }
+
+  static async saveAutoStartWork(context: Context, enabled: boolean): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AUTO_START_WORK, enabled);
+    await prefs.flush();
+  }
+
+  static async loadAutoStartWork(context: Context): Promise<boolean> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      const legacy = await prefs.get(PREF_KEY_AUTO_START, false) as boolean;
+      return await prefs.get(PREF_KEY_AUTO_START_WORK, legacy) as boolean;
+    } catch {
+      return false;
+    }
+  }
+
+  static async saveAutoStartBreak(context: Context, enabled: boolean): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AUTO_START_BREAK, enabled);
+    await prefs.flush();
+  }
+
+  static async loadAutoStartBreak(context: Context): Promise<boolean> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      const legacy = await prefs.get(PREF_KEY_AUTO_START, false) as boolean;
+      return await prefs.get(PREF_KEY_AUTO_START_BREAK, legacy) as boolean;
+    } catch {
+      return false;
+    }
+  }
+
+  static async saveTimerPreset(context: Context, preset: string): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_TIMER_PRESET, preset);
+    await prefs.flush();
+  }
+
+  static async loadTimerPreset(context: Context): Promise<string> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_TIMER_PRESET, 'classic') as string;
+    } catch {
+      return 'classic';
+    }
+  }
+
+  static async saveSoundEnabled(context: Context, enabled: boolean): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_SOUND_ENABLED, enabled);
+    await prefs.flush();
+  }
+
+  static async loadSoundEnabled(context: Context): Promise<boolean> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_SOUND_ENABLED, true) as boolean;
+    } catch {
+      return true;
+    }
+  }
+
+  static async saveSoundVolume(context: Context, volume: number): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_SOUND_VOLUME, volume);
+    await prefs.flush();
+  }
+
+  static async loadSoundVolume(context: Context): Promise<number> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_SOUND_VOLUME, DEFAULT_SOUND_VOLUME) as number;
+    } catch {
+      return DEFAULT_SOUND_VOLUME;
+    }
+  }
+
+  static async saveAmbientVolume(context: Context, volume: number): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AMBIENT_VOLUME, volume);
+    await prefs.flush();
+  }
+
+  static async loadAmbientVolume(context: Context): Promise<number> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_AMBIENT_VOLUME, DEFAULT_AMBIENT_VOLUME) as number;
+    } catch {
+      return DEFAULT_AMBIENT_VOLUME;
+    }
+  }
+
+  static async saveTaskContext(context: Context, taskContext: TaskContext): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_TASK_CONTEXT, JSON.stringify(taskContext));
+    await prefs.flush();
+  }
+
+  static async loadTaskContext(context: Context): Promise<TaskContext> {
+    const defaultValue: TaskContext = { task: '', project: '', tag: '', note: '', estimatedPomodoros: 1 };
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      const raw = await prefs.get(PREF_KEY_TASK_CONTEXT, '');
+      if (typeof raw === 'string' && raw.length > 0) {
+        return JSON.parse(raw) as TaskContext;
+      }
+      return defaultValue;
+    } catch {
+      return defaultValue;
     }
   }
 }

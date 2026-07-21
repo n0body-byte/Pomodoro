@@ -3,7 +3,7 @@ import { media } from '@kit.MediaKit';
 let player: media.AVPlayer | null = null;
 
 export class SoundHelper {
-  static async play(context: Context, soundName: string): Promise<void> {
+  static async play(context: Context, soundName: string, volume: number = 1): Promise<void> {
     try {
       if (player !== null) {
         await player.reset();
@@ -20,6 +20,7 @@ export class SoundHelper {
           if (state === 'initialized') {
             player!.prepare();
           } else if (state === 'prepared') {
+            player!.setVolume(Math.max(0, Math.min(volume, 1)));
             player!.play();
           } else if (state === 'completed') {
             player!.stop();

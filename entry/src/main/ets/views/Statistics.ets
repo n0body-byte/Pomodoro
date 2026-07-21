@@ -2,6 +2,7 @@ import { PreferencesHelper, DailyStats } from '../utils/PreferencesHelper';
 
 @Component
 export struct Statistics {
+  @Prop @Watch('onActiveChange') active: boolean = false;
   @State selectedTab: number = 0;
   @State dailyData: DailyStats[] = [];
   @State weeklyData: DailyStats[] = [];
@@ -18,6 +19,12 @@ export struct Statistics {
 
   async onPageShow(): Promise<void> {
     await this.loadAllStats();
+  }
+
+  async onActiveChange(): Promise<void> {
+    if (this.active) {
+      await this.loadAllStats();
+    }
   }
 
   private getContext(): Context | null {

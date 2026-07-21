@@ -4,6 +4,7 @@ export struct CircularProgress {
   @Prop remainingSeconds: number = 0;
   @Prop totalSeconds: number = 1;
   @Prop isWorkMode: boolean = true;
+  @Prop isLongBreak: boolean = false;
 
   private formatMinutes(): string {
     return Math.floor(this.remainingSeconds / 60).toString().padStart(2, '0');
@@ -65,7 +66,7 @@ export struct CircularProgress {
             .letterSpacing(-2)
         }
 
-        Text(this.isWorkMode ? '专注' : '休息')
+        Text(this.isWorkMode ? '专注' : (this.isLongBreak ? '长休息' : '休息'))
           .fontSize(11)
           .fontColor(this.isWorkMode ? $r('app.color.primary_red') : $r('app.color.primary_green'))
           .fontWeight(FontWeight.Bold)
