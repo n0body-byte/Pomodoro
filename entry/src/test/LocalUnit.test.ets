@@ -2,6 +2,8 @@ import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from
 import { PreferencesHelper, SessionRecord } from '../main/ets/utils/PreferencesHelper';
 import { TimerHelper } from '../main/ets/utils/TimerHelper';
 import { TimerPlanHelper } from '../main/ets/utils/TimerPlanHelper';
+import { AiPlanInsightHelper } from '../main/ets/utils/AiPlanInsightHelper';
+import { AiPlanStep } from '../main/ets/utils/AiAgentModels';
 
 export default function localUnitTest() {
   describe('localUnitTest', () => {
@@ -82,6 +84,46 @@ export default function localUnitTest() {
       expect(TimerPlanHelper.shouldAutoStart(true, false, true)).assertFalse();
       expect(TimerPlanHelper.shouldAutoStart(false, false, true)).assertTrue();
       expect(TimerPlanHelper.shouldAutoStart(false, true, false)).assertFalse();
+    });
+
+    it('planInsightOnTrack', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '完成主体', project: '报告', tag: '写作', note: '', estimatedPomodoros: 2,
+          reason: '', completed: false },
+        { title: '检查提交', project: '报告', tag: '检查', note: '', estimatedPomodoros: 1,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 120, 25, 5);
+      expect(insight.requiredMinutes).assertEqual(85);
+      expect(insight.bufferMinutes).assertEqual(35);
+      expect(insight.status).assertEqual('on_track');
+      expect(insight.nextStepIndex).assertEqual(0);
+    });
+
+    it('planInsightOverCapacity', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '完成主体', project: '报告', tag: '写作', note: '', estimatedPomodoros: 3,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 60, 25, 5);
+      expect(insight.requiredMinutes).assertEqual(85);
+      expect(insight.bufferMinutes).assertEqual(-25);
+      expect(insight.feasibilityPercent).assertEqual(71);
+      expect(insight.status).assertEqual('over_capacity');
+    });
+
+    it('planInsightWeightedProgress', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '资料整理', project: '报告', tag: '准备', note: '', estimatedPomodoros: 2,
+          reason: '', completed: true },
+        { title: '最终检查', project: '报告', tag: '检查', note: '', estimatedPomodoros: 1,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 30, 25, 5);
+      expect(insight.progressPercent).assertEqual(67);
+      expect(insight.remainingPomodoros).assertEqual(1);
+      expect(insight.requiredMinutes).assertEqual(25);
+      expect(insight.nextStepIndex).assertEqual(1);
     });
   });
 }

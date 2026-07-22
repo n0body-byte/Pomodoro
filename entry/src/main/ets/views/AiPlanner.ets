@@ -1,5 +1,6 @@
 import { PreferencesHelper, SessionRecord } from '../utils/PreferencesHelper';
 import { AiPlanResult, AiPlannerService } from '../utils/AiPlannerService';
+import { AiPlanInsightHelper } from '../utils/AiPlanInsightHelper';
 import {
   AiAgentResult,
   AiAgentState,
@@ -7,6 +8,7 @@ import {
   AiConversationSummary,
   AiFocusContext,
   AiPlan,
+  AiPlanInsight,
   AiPlanStep
 } from '../utils/AiAgentModels';
 
@@ -106,6 +108,10 @@ export struct AiPlanner {
     this.conversationId = state.id;
     this.conversationTitle = state.title;
     this.conversationCreatedAt = state.createdAt;
+    if (typeof state.availableMinutes === 'number' && state.availableMinutes > 0) {
+      this.availableMinutes = Math.round(state.availableMinutes);
+    }
+    this.deadline = typeof state.deadline === 'string' ? state.deadline : '';
   }
 
   private async loadConversationHistory(): Promise<void> {
@@ -141,7 +147,9 @@ export struct AiPlanner {
       plan: { summary: this.summary, steps: this.planSteps },
       updatedAt: now,
       needsReview: this.needsReview,
-      lastCompletedStepTitle: this.lastCompletedStepTitle
+      lastCompletedStepTitle: this.lastCompletedStepTitle,
+      availableMinutes: this.availableMinutes,
+      deadline: this.deadline
     };
   }
 
@@ -269,6 +277,7 @@ export struct AiPlanner {
         recentSummary += '\n';
       }
     }
+    const insight = this.getPlanInsight();
     return {
       todayWorkSeconds: this.todayWorkSeconds,
       todayBreakSeconds: this.todayBreakSeconds,
@@ -282,8 +291,39 @@ export struct AiPlanner {
       currentTaskCompleted: this.currentTaskCompleted,
       workMinutes: this.workMinutes,
       breakMinutes: this.breakMinutes,
-      recentSessionsSummary: recentSummary.length > 0 ? recentSummary : '暂无历史记录'
+      recentSessionsSummary: recentSummary.length > 0 ? recentSummary : '暂无历史记录',
+      availableMinutes: this.availableMinutes,
+      deadline: this.deadline.trim().length > 0 ? this.deadline.trim() : '未指定',
+      planRequiredMinutes: insight.requiredMinutes,
+      planBufferMinutes: insight.bufferMinutes,
+      planProgressPercent: insight.progressPercent,
+      planRiskStatus: insight.status
     };
+  }
+
+  private getPlanInsight(): AiPlanInsight {
+    return AiPlanInsightHelper.calculate(
+      this.planSteps, this.availableMinutes, this.workMinutes, this.breakMinutes);
+  }
+
+  private applyNextStep(): void {
+    const insight = this.getPlanInsight();
+    if (insight.nextStepIndex < 0) {
+      this.successMessage = '当前计划已经全部完成';
+      return;
+    }
+    const step = this.planSteps[insight.nextStepIndex];
+    if (step !== undefined) {
+      this.applyStep(step);
+    }
+  }
+
+  private async requestPlanCompression(): Promise<void> {
+    const insight = this.getPlanInsight();
+    const message = `当前计划剩余 ${insight.remainingPomodoros} 个番茄，预计需要 ` +
+      `${insight.requiredMinutes} 分钟，但我现在只有 ${this.availableMinutes} 分钟。` +
+      `请保留最有价值的可交付成果，压缩或合并后续步骤，并保留合理缓冲。`;
+    await this.askAgent(message);
   }
 
   private appendMessages(userText: string, assistantText: string): void {
@@ -484,7 +524,7 @@ export struct AiPlanner {
                 .fontColor($r('app.color.text_primary')).maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
               Text(`${this.formatConversationTime(item.updatedAt)} · ${item.messageCount} 条消息 · ` +
-                `${item.stepCount} 个步骤`)
+                `${item.completedStepCount === undefined ? 0 : item.completedStepCount}/${item.stepCount} 步`)
                 .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
             }.layoutWeight(1)
             Button('打开').width(54).height(32).fontSize(10).borderRadius(16)
@@ -623,6 +663,62 @@ export struct AiPlanner {
       }
       .width('100%').padding(14).backgroundColor('#2065FE08').borderRadius(16)
     }
+  }
+
+  @Builder
+  private planInsightCard(insight: AiPlanInsight) {
+    Column({ space: 11 }) {
+      Row() {
+        Column({ space: 3 }) {
+          Text('本地计划健康度').fontSize(15).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          Text(insight.title).fontSize(11)
+            .fontColor(insight.status === 'over_capacity' ?
+              $r('app.color.primary_red') : $r('app.color.primary_green')).width('100%')
+        }.layoutWeight(1)
+        Text(`${insight.feasibilityPercent}% 可行度`).fontSize(10).fontWeight(FontWeight.Bold)
+          .fontColor(insight.status === 'over_capacity' ?
+            $r('app.color.primary_red') : $r('app.color.primary_green'))
+          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+          .backgroundColor($r('app.color.ring_track')).borderRadius(13)
+      }.width('100%')
+      Row({ space: 8 }) {
+        Column({ space: 3 }) {
+          Text('计划进度').fontSize(9).fontColor($r('app.color.text_tertiary'))
+          Text(`${insight.progressPercent}%`).fontSize(16).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Column({ space: 3 }) {
+          Text('剩余番茄').fontSize(9).fontColor($r('app.color.text_tertiary'))
+          Text(`${insight.remainingPomodoros}`).fontSize(16).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Column({ space: 3 }) {
+          Text('预计耗时').fontSize(9).fontColor($r('app.color.text_tertiary'))
+          Text(this.formatMinutes(insight.requiredMinutes)).fontSize(13).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      }.width('100%')
+      Text(insight.description).fontSize(11).lineHeight(17)
+        .fontColor($r('app.color.text_secondary')).width('100%')
+      if (insight.status !== 'completed') {
+        Row({ space: 8 }) {
+          Button(this.canApplyStep ? '执行下一步' : '计时结束后执行')
+            .layoutWeight(1).height(36).fontSize(11).enabled(this.canApplyStep)
+            .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(18)
+            .onClick(() => this.applyNextStep())
+          if (insight.status === 'over_capacity' || insight.status === 'tight') {
+            Button(this.isLoading ? '正在重排…' : 'AI 压缩计划')
+              .layoutWeight(1).height(36).fontSize(11).enabled(!this.isLoading)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_red'))
+              .borderRadius(18).onClick(() => this.requestPlanCompression())
+          }
+        }.width('100%')
+      }
+    }
+    .width('100%').padding(14).backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: insight.status === 'over_capacity' ?
+      $r('app.color.primary_red') : $r('app.color.card_border') }).borderRadius(16)
   }
 
   @Builder
@@ -792,6 +888,7 @@ export struct AiPlanner {
                 .fontColor($r('app.color.text_secondary')).padding(14)
                 .backgroundColor($r('app.color.surface')).borderRadius(16)
             }
+            this.planInsightCard(this.getPlanInsight())
             ForEach(this.planSteps, (step: AiPlanStep, index: number) => {
               this.planCard(step, index)
             }, (step: AiPlanStep, index: number) => `${index}-${step.title}`)

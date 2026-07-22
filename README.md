@@ -2,6 +2,8 @@
 
 一款使用 ArkTS 与 ArkUI 开发的 HarmonyOS 番茄钟应用。项目将计时、任务、历史、统计、成就与 AI 规划组合成完整的专注执行闭环。
 
+当前版本：`1.1.0`。仓库同时提供源码、自动化测试、真实模拟器截图、未签名 HAP 和完整项目说明，便于评审和复现。
+
 ## 功能概览
 
 - 专注、短休息和长休息计时，支持分别设置自动衔接规则
@@ -13,7 +15,10 @@
 - 通知栏倒计时、结束通知、振动、提示音和三种白噪音
 - 深色与浅色主题、音量控制和设置持久化
 - DeepSeek 多轮执行智能体：结合真实专注数据生成计划、应用任务、跟踪完成状态并复盘
-- AI 对话历史归档与恢复；API Key 仅保留在运行内存中
+- 本地计划健康度：按番茄工作量计算加权进度、预计耗时、时间缓冲与超载风险
+- 超载时一键要求 AI 压缩计划，健康度卡片可直接执行下一步
+- AI 对话历史归档与恢复，保留可用时间、截止条件和步骤进度
+- API Key 仅保留在运行内存中
 
 ## 应用界面
 
@@ -22,6 +27,20 @@
   <img src="docs/images/ai.jpeg" width="30%" alt="AI 执行智能体">
   <img src="docs/images/settings.jpeg" width="30%" alt="设置页">
 </p>
+
+<p align="center">
+  <img src="docs/images/ai-insight.jpeg" width="46%" alt="AI 本地计划健康度与超载预警">
+</p>
+
+## 评审快速入口
+
+| 评分项 | 可直接检查的证据 |
+|---|---|
+| 创新性 | AI 多轮执行、真实专注数据上下文、本地计划健康度、超载预警与闭环复盘 |
+| 完备度 | 6 个功能 Tab、历史修正、状态恢复、AI 会话恢复、10 项核心单元测试 |
+| 前景评估 | [项目说明第九章](说明文档.md#九产品前景与社会价值)中的用户、社会价值、商业路径与风险分析 |
+| 规范性 | 分层 ArkTS 源码、README、隐私说明、版本记录、测试矩阵、真实截图和 PDF |
+| 实际应用价值 | [版本化未签名 HAP](output/hap/Pomodoro-1.1.0-unsigned.hap)、完整源码和五分钟演示脚本 |
 
 <p align="center">
   <img src="docs/images/statistics.jpeg" width="30%" alt="统计页">
@@ -65,6 +84,14 @@ hvigorw --mode module -p product=default assembleHap --no-daemon
 entry/build/default/outputs/default/entry-default-unsigned.hap
 ```
 
+仓库中的可复现交付版本位于：
+
+```text
+output/hap/Pomodoro-1.1.0-unsigned.hap
+```
+
+HAP 与 PDF 的 SHA-256 校验值见 [`output/CHECKSUMS.sha256`](output/CHECKSUMS.sha256)。
+
 项目未提交个人签名配置，因此命令行构建默认输出未签名 HAP。安装到真机前需在 DevEco Studio 中配置签名。
 
 ## 使用 DeepSeek 智能体
@@ -73,7 +100,8 @@ entry/build/default/outputs/default/entry-default-unsigned.hap
 2. 打开右上角服务设置。
 3. 选择 V4 Flash 或 V4 Pro，输入 DeepSeek API Key。
 4. 描述目标、可用时间与截止时间，生成执行计划。
-5. 将计划步骤设为当前专注任务，完成后返回 AI 页面复盘。
+5. 查看本地健康度、预计耗时和容量风险，必要时让 AI 压缩计划。
+6. 执行下一步；完成后返回 AI 页面复盘。
 
 安全说明：DeepSeek API Key 不写入 Preferences，也不会进入 AI 对话历史；退出应用后需要重新输入。客户端直连适合个人演示和开发，正式发布建议使用带鉴权、限流与日志脱敏的服务端代理。
 
@@ -96,10 +124,13 @@ node .\ai-proxy\server.mjs
 - 完成、放弃、跳过和休息记录的统计兼容性
 - 长休息触发周期与异常间隔
 - 专注/休息的独立自动开始规则
+- 计划健康度、加权进度、预计耗时和超载风险
 
 ```powershell
 hvigorw test -p module=entry
 ```
+
+当前验证结果：`10/10` 单元测试通过，`assembleHap` 构建通过。
 
 完整手动验证矩阵、架构说明、评分点映射与产品前景分析见 [项目说明文档](说明文档.md)，排版版 PDF 见 [项目说明文档 PDF](output/pdf/番茄钟项目说明文档.pdf)。
 
@@ -119,3 +150,5 @@ entry/src/main/ets/
 - [完整项目说明](说明文档.md)
 - [PDF 版项目说明](output/pdf/番茄钟项目说明文档.pdf)
 - [AI 代理说明](ai-proxy/README.md)
+- [隐私与数据说明](PRIVACY.md)
+- [版本更新记录](CHANGELOG.md)

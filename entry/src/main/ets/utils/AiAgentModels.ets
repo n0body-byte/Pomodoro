@@ -28,6 +28,8 @@ export interface AiAgentState {
   updatedAt: number;
   needsReview: boolean;
   lastCompletedStepTitle: string;
+  availableMinutes?: number;
+  deadline?: string;
 }
 
 export interface AiConversationSummary {
@@ -37,6 +39,7 @@ export interface AiConversationSummary {
   updatedAt: number;
   messageCount: number;
   stepCount: number;
+  completedStepCount?: number;
 }
 
 export interface AiFocusContext {
@@ -53,6 +56,26 @@ export interface AiFocusContext {
   workMinutes: number;
   breakMinutes: number;
   recentSessionsSummary: string;
+  availableMinutes: number;
+  deadline: string;
+  planRequiredMinutes: number;
+  planBufferMinutes: number;
+  planProgressPercent: number;
+  planRiskStatus: string;
+}
+
+export interface AiPlanInsight {
+  totalPomodoros: number;
+  completedPomodoros: number;
+  remainingPomodoros: number;
+  progressPercent: number;
+  requiredMinutes: number;
+  bufferMinutes: number;
+  feasibilityPercent: number;
+  status: string;
+  title: string;
+  description: string;
+  nextStepIndex: number;
 }
 
 export interface AiUsage {

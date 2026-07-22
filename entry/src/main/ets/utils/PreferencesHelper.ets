@@ -650,7 +650,10 @@ export class PreferencesHelper {
         updatedAt: state.updatedAt,
         needsReview: state.needsReview === true,
         lastCompletedStepTitle: typeof state.lastCompletedStepTitle === 'string' ?
-          state.lastCompletedStepTitle : ''
+          state.lastCompletedStepTitle : '',
+        availableMinutes: typeof state.availableMinutes === 'number' && state.availableMinutes > 0 ?
+          Math.round(state.availableMinutes) : 120,
+        deadline: typeof state.deadline === 'string' ? state.deadline : ''
       };
     } catch {
       return emptyState;
@@ -692,13 +695,20 @@ export class PreferencesHelper {
         oldHistory = [];
       }
     }
+    let completedStepCount = 0;
+    for (const step of state.plan.steps) {
+      if (step.completed) {
+        completedStepCount += 1;
+      }
+    }
     const history: AiConversationSummary[] = [{
       id: state.id,
       title: state.title.length > 0 ? state.title : '未命名对话',
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       messageCount: state.messages.length,
-      stepCount: state.plan.steps.length
+      stepCount: state.plan.steps.length,
+      completedStepCount: completedStepCount
     }];
     for (const item of oldHistory) {
       if (item.id !== state.id && history.length < 20) {
@@ -782,7 +792,9 @@ export class PreferencesHelper {
       plan: updatedPlan,
       updatedAt: Date.now(),
       needsReview: true,
-      lastCompletedStepTitle: task
+      lastCompletedStepTitle: task,
+      availableMinutes: state.availableMinutes,
+      deadline: state.deadline
     });
   }
 }
