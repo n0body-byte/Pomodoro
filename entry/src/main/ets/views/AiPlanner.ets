@@ -1,0 +1,806 @@
+import { PreferencesHelper, SessionRecord } from '../utils/PreferencesHelper';
+import { AiPlanResult, AiPlannerService } from '../utils/AiPlannerService';
+import {
+  AiAgentResult,
+  AiAgentState,
+  AiChatMessage,
+  AiConversationSummary,
+  AiFocusContext,
+  AiPlan,
+  AiPlanStep
+} from '../utils/AiAgentModels';
+
+@Component
+export struct AiPlanner {
+  @Prop @Watch('onActiveChange') active: boolean = false;
+  @Prop workMinutes: number = 25;
+  @Prop breakMinutes: number = 5;
+  @Prop canApplyStep: boolean = true;
+  @Prop todayWorkSeconds: number = 0;
+  @Prop todayBreakSeconds: number = 0;
+  @Prop todayCompletedSessions: number = 0;
+  @Prop dailyTarget: number = 8;
+  @Prop currentTask: string = '';
+  @Prop currentProject: string = '';
+  @Prop currentTaskCompleted: number = 0;
+  @State serviceMode: string = 'deepseek';
+  @State apiKey: string = '';
+  @State deepSeekModel: string = 'deepseek-v4-flash';
+  @State endpoint: string = '';
+  @State goal: string = '';
+  @State deadline: string = '';
+  @State availableMinutes: number = 120;
+  @State isLoading: boolean = false;
+  @State showServiceSettings: boolean = false;
+  @State summary: string = '';
+  @State planSteps: AiPlanStep[] = [];
+  @State chatMessages: AiChatMessage[] = [];
+  @State followUp: string = '';
+  @State errorMessage: string = '';
+  @State successMessage: string = '';
+  @State needsReview: boolean = false;
+  @State lastCompletedStepTitle: string = '';
+  @State lastTotalTokens: number = 0;
+  @State conversationId: string = '';
+  @State conversationTitle: string = '';
+  @State conversationCreatedAt: number = 0;
+  @State conversationHistory: AiConversationSummary[] = [];
+  @State showConversationHistory: boolean = false;
+  onApplyStep?: (step: AiPlanStep) => void;
+
+  private examples: string[] = [
+    '今晚复习两章高数并完成课后题',
+    '三天内完成产品需求文档初稿',
+    '用两个小时整理本周工作并规划下周'
+  ];
+
+  async aboutToAppear(): Promise<void> {
+    this.endpoint = await PreferencesHelper.loadAiServiceEndpoint(this.getContext());
+    await this.loadAgentState();
+    await this.loadConversationHistory();
+    this.showServiceSettings = this.apiKey.length === 0;
+  }
+
+  async onActiveChange(): Promise<void> {
+    if (this.active) {
+      await this.loadAgentState();
+      await this.loadConversationHistory();
+    }
+  }
+
+  private getContext(): Context {
+    return this.getUIContext().getHostContext()!;
+  }
+
+  private emptyPlan(): AiPlan {
+    return { summary: '', steps: [] };
+  }
+
+  private copyStep(step: AiPlanStep, completed: boolean = step.completed): AiPlanStep {
+    return {
+      title: step.title,
+      project: step.project,
+      tag: step.tag,
+      note: step.note,
+      estimatedPomodoros: step.estimatedPomodoros,
+      reason: step.reason,
+      completed: completed
+    };
+  }
+
+  private async loadAgentState(): Promise<void> {
+    const state = await PreferencesHelper.loadAiAgentState(this.getContext());
+    this.applyAgentState(state);
+  }
+
+  private applyAgentState(state: AiAgentState): void {
+    const steps: AiPlanStep[] = [];
+    for (const step of state.plan.steps) {
+      steps.push(this.copyStep(step, step.completed === true));
+    }
+    this.chatMessages = state.messages;
+    this.summary = state.plan.summary;
+    this.planSteps = steps;
+    this.needsReview = state.needsReview;
+    this.lastCompletedStepTitle = state.lastCompletedStepTitle;
+    this.conversationId = state.id;
+    this.conversationTitle = state.title;
+    this.conversationCreatedAt = state.createdAt;
+  }
+
+  private async loadConversationHistory(): Promise<void> {
+    this.conversationHistory = await PreferencesHelper.loadAiConversationHistory(this.getContext());
+  }
+
+  private resolveConversationTitle(): string {
+    for (const message of this.chatMessages) {
+      if (message.role === 'user' && message.content.trim().length > 0) {
+        return message.content.trim().substring(0, 24);
+      }
+    }
+    if (this.goal.trim().length > 0) {
+      return this.goal.trim().substring(0, 24);
+    }
+    return '未命名对话';
+  }
+
+  private createCurrentState(): AiAgentState {
+    const now = Date.now();
+    if (this.conversationId.length === 0) {
+      this.conversationId = `ai-${now}`;
+      this.conversationCreatedAt = now;
+    }
+    if (this.conversationTitle.length === 0 || this.conversationTitle === '未命名对话') {
+      this.conversationTitle = this.resolveConversationTitle();
+    }
+    return {
+      id: this.conversationId,
+      title: this.conversationTitle,
+      createdAt: this.conversationCreatedAt,
+      messages: this.chatMessages,
+      plan: { summary: this.summary, steps: this.planSteps },
+      updatedAt: now,
+      needsReview: this.needsReview,
+      lastCompletedStepTitle: this.lastCompletedStepTitle
+    };
+  }
+
+  private async saveAgentState(needsReview: boolean = this.needsReview): Promise<void> {
+    this.needsReview = needsReview;
+    const state = this.createCurrentState();
+    await PreferencesHelper.saveAiAgentState(this.getContext(), state);
+  }
+
+  private async startNewConversation(): Promise<void> {
+    if (this.chatMessages.length > 0 || this.planSteps.length > 0) {
+      const state = this.createCurrentState();
+      await PreferencesHelper.archiveAiConversation(this.getContext(), state);
+    }
+    await PreferencesHelper.clearAiAgentState(this.getContext());
+    this.conversationId = '';
+    this.conversationTitle = '';
+    this.conversationCreatedAt = 0;
+    this.chatMessages = [];
+    this.summary = '';
+    this.planSteps = [];
+    this.goal = '';
+    this.followUp = '';
+    this.needsReview = false;
+    this.lastCompletedStepTitle = '';
+    this.lastTotalTokens = 0;
+    this.errorMessage = '';
+    this.successMessage = '已开始新对话';
+    await this.loadConversationHistory();
+  }
+
+  private async openArchivedConversation(id: string): Promise<void> {
+    const archived = await PreferencesHelper.loadArchivedAiConversation(this.getContext(), id);
+    if (archived === undefined) {
+      this.errorMessage = '历史对话已不存在或无法读取';
+      await this.loadConversationHistory();
+      return;
+    }
+    if (this.chatMessages.length > 0 || this.planSteps.length > 0) {
+      await PreferencesHelper.archiveAiConversation(this.getContext(), this.createCurrentState());
+    }
+    await PreferencesHelper.saveAiAgentState(this.getContext(), archived);
+    await PreferencesHelper.removeArchivedAiConversation(this.getContext(), id);
+    this.applyAgentState(archived);
+    this.goal = '';
+    this.followUp = '';
+    this.lastTotalTokens = 0;
+    this.errorMessage = '';
+    this.successMessage = '已恢复历史对话，可以继续调整计划';
+    this.showConversationHistory = false;
+    await this.loadConversationHistory();
+  }
+
+  private changeAvailableMinutes(delta: number): void {
+    this.availableMinutes = Math.max(this.workMinutes, Math.min(1440, this.availableMinutes + delta));
+  }
+
+  private formatMinutes(minutes: number): string {
+    if (minutes < 60) {
+      return `${minutes} 分钟`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    return rest > 0 ? `${hours} 小时 ${rest} 分钟` : `${hours} 小时`;
+  }
+
+  private formatSeconds(seconds: number): string {
+    return this.formatMinutes(Math.round(seconds / 60));
+  }
+
+  private formatConversationTime(timestamp: number): string {
+    if (timestamp <= 0) {
+      return '时间未知';
+    }
+    const date = new Date(timestamp);
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const minuteText = minutes < 10 ? `0${minutes}` : `${minutes}`;
+    return `${month}月${day}日 ${hours}:${minuteText}`;
+  }
+
+  private async saveEndpoint(): Promise<void> {
+    const normalized = this.endpoint.trim();
+    if (normalized.length === 0) {
+      this.errorMessage = '请填写 AI 服务地址';
+      return;
+    }
+    await PreferencesHelper.saveAiServiceEndpoint(this.getContext(), normalized);
+    this.endpoint = normalized;
+    this.errorMessage = '';
+    this.successMessage = '代理地址已保存';
+    this.showServiceSettings = false;
+  }
+
+  private async buildFocusContext(): Promise<AiFocusContext> {
+    const history = await PreferencesHelper.loadSessionHistory(this.getContext());
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    let sevenDayWorkSeconds = 0;
+    let sevenDayCompletedSessions = 0;
+    let sevenDayAbandonedSessions = 0;
+    for (const record of history) {
+      if (record.completedAt >= sevenDaysAgo && record.type !== 'break') {
+        sevenDayWorkSeconds += record.workSeconds;
+        if (record.status === 'completed') {
+          sevenDayCompletedSessions += 1;
+        } else if (record.status === 'abandoned') {
+          sevenDayAbandonedSessions += 1;
+        }
+      }
+    }
+    let recentSummary = '';
+    const startIndex = Math.max(0, history.length - 8);
+    for (let index = history.length - 1; index >= startIndex; index--) {
+      const record: SessionRecord | undefined = history[index];
+      if (record !== undefined) {
+        const type = record.type === 'break' ? '休息' : '专注';
+        const status = record.status === 'completed' ? '完成' :
+          (record.status === 'abandoned' ? '部分完成' : '跳过');
+        recentSummary += `${record.date} ${type}${Math.round(record.workSeconds / 60)}分钟 ${status}`;
+        if (record.task !== undefined && record.task.length > 0) {
+          recentSummary += ` 任务:${record.task}`;
+        }
+        recentSummary += '\n';
+      }
+    }
+    return {
+      todayWorkSeconds: this.todayWorkSeconds,
+      todayBreakSeconds: this.todayBreakSeconds,
+      todayCompletedSessions: this.todayCompletedSessions,
+      dailyTarget: this.dailyTarget,
+      sevenDayWorkSeconds: sevenDayWorkSeconds,
+      sevenDayCompletedSessions: sevenDayCompletedSessions,
+      sevenDayAbandonedSessions: sevenDayAbandonedSessions,
+      currentTask: this.currentTask,
+      currentProject: this.currentProject,
+      currentTaskCompleted: this.currentTaskCompleted,
+      workMinutes: this.workMinutes,
+      breakMinutes: this.breakMinutes,
+      recentSessionsSummary: recentSummary.length > 0 ? recentSummary : '暂无历史记录'
+    };
+  }
+
+  private appendMessages(userText: string, assistantText: string): void {
+    const messages: AiChatMessage[] = [];
+    const startIndex = Math.max(0, this.chatMessages.length - 28);
+    for (let index = startIndex; index < this.chatMessages.length; index++) {
+      const item = this.chatMessages[index];
+      if (item !== undefined) {
+        messages.push(item);
+      }
+    }
+    messages.push({ role: 'user', content: userText, createdAt: Date.now() });
+    messages.push({ role: 'assistant', content: assistantText, createdAt: Date.now() });
+    this.chatMessages = messages;
+  }
+
+  private async askAgent(message: string): Promise<boolean> {
+    if (this.isLoading) {
+      return false;
+    }
+    const normalized = message.trim();
+    if (normalized.length < 2) {
+      this.errorMessage = '请告诉 AI 你想规划或调整什么';
+      return false;
+    }
+    if (this.serviceMode === 'deepseek' && this.apiKey.trim().length < 10) {
+      this.errorMessage = '请先填写 DeepSeek API Key';
+      this.showServiceSettings = true;
+      return false;
+    }
+    if (this.serviceMode === 'proxy' && this.endpoint.trim().length === 0) {
+      this.errorMessage = '请先配置代理服务地址';
+      this.showServiceSettings = true;
+      return false;
+    }
+    this.isLoading = true;
+    this.errorMessage = '';
+    this.successMessage = '';
+    if (this.serviceMode === 'deepseek') {
+      const focusContext = await this.buildFocusContext();
+      const result: AiAgentResult = await AiPlannerService.continueDeepSeekAgent(
+        this.apiKey, this.deepSeekModel, normalized, this.chatMessages,
+        { summary: this.summary, steps: this.planSteps }, focusContext);
+      this.isLoading = false;
+      if (!result.success) {
+        this.errorMessage = result.errorMessage;
+        return false;
+      }
+      this.appendMessages(normalized, result.reply);
+      this.summary = result.plan.summary;
+      this.planSteps = result.plan.steps;
+      this.lastTotalTokens = result.usage.totalTokens;
+      this.needsReview = false;
+      await this.saveAgentState(false);
+      return true;
+    }
+
+    if (this.chatMessages.length > 0) {
+      this.isLoading = false;
+      this.errorMessage = '安全代理模式暂未升级多轮协议，请使用 DeepSeek 直连';
+      return false;
+    }
+    const result: AiPlanResult = await AiPlannerService.createPlan(
+      this.endpoint, normalized, this.availableMinutes, this.deadline, this.workMinutes, this.breakMinutes);
+    this.isLoading = false;
+    if (!result.success) {
+      this.errorMessage = result.errorMessage;
+      return false;
+    }
+    this.summary = result.plan.summary;
+    this.planSteps = result.plan.steps;
+    this.appendMessages(normalized, result.plan.summary);
+    await this.saveAgentState(false);
+    return true;
+  }
+
+  private async generatePlan(): Promise<void> {
+    if (this.goal.trim().length < 4) {
+      this.errorMessage = '请更具体地描述你想完成的目标';
+      return;
+    }
+    const deadlineText = this.deadline.trim().length > 0 ? this.deadline.trim() : '未指定';
+    const message = `请制定或重新规划这个目标：${this.goal.trim()}。` +
+      `我可用 ${this.availableMinutes} 分钟，截止时间：${deadlineText}。`;
+    await this.askAgent(message);
+  }
+
+  private async sendFollowUp(): Promise<void> {
+    const message = this.followUp.trim();
+    if (await this.askAgent(message)) {
+      this.followUp = '';
+    }
+  }
+
+  private async reviewCompletedStep(): Promise<void> {
+    const title = this.lastCompletedStepTitle.length > 0 ? this.lastCompletedStepTitle : '刚才的任务';
+    const message = `我刚完成了“${title}”。请根据最新专注数据复盘完成情况，` +
+      `判断后续计划是否需要调整，并告诉我下一轮最应该做什么。`;
+    await this.askAgent(message);
+  }
+
+  private applyStep(step: AiPlanStep): void {
+    if (!this.canApplyStep) {
+      this.errorMessage = '请先完成或重置当前一轮计时，再切换任务';
+      return;
+    }
+    if (this.onApplyStep) {
+      this.onApplyStep(step);
+    }
+    this.successMessage = `已将“${step.title}”设为当前任务`;
+  }
+
+  private async toggleStepCompleted(stepIndex: number): Promise<void> {
+    const steps: AiPlanStep[] = [];
+    for (let index = 0; index < this.planSteps.length; index++) {
+      const step = this.planSteps[index];
+      if (step !== undefined) {
+        steps.push(this.copyStep(step, index === stepIndex ? !step.completed : step.completed));
+      }
+    }
+    this.planSteps = steps;
+    this.needsReview = true;
+    const changed = this.planSteps[stepIndex];
+    if (changed !== undefined && changed.completed) {
+      this.lastCompletedStepTitle = changed.title;
+    }
+    await this.saveAgentState(true);
+  }
+
+  private getCompletedStepCount(): number {
+    let count = 0;
+    for (const step of this.planSteps) {
+      if (step.completed) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  @Builder
+  private pageHeader() {
+    Row({ space: 10 }) {
+      Column() {
+        Image($r('app.media.ai_plan')).width(24).height(24).fillColor(Color.Black)
+      }
+      .width(42).height(42)
+      .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+      .backgroundColor($r('app.color.primary_green')).borderRadius(14)
+
+      Column({ space: 3 }) {
+        Text('AI 执行智能体').fontSize($r('app.float.title_font_size'))
+          .fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary')).width('100%')
+        Text('结合你的专注历史持续规划、执行与复盘')
+          .fontSize($r('app.float.caption_font_size'))
+          .fontColor($r('app.color.text_tertiary')).width('100%')
+      }.layoutWeight(1)
+
+      if (this.conversationHistory.length > 0) {
+        Button(`历史 ${this.conversationHistory.length}`).height(34).fontSize(10).borderRadius(17)
+          .backgroundColor(this.showConversationHistory ? $r('app.color.primary_green') :
+            $r('app.color.ring_track'))
+          .fontColor(this.showConversationHistory ? Color.Black : $r('app.color.text_secondary'))
+          .onClick(() => this.showConversationHistory = !this.showConversationHistory)
+      }
+      if (this.chatMessages.length > 0 || this.planSteps.length > 0) {
+        Button('新对话').height(34).fontSize(10).borderRadius(17)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+          .onClick(() => this.startNewConversation())
+      }
+      Button() {
+        Image($r('app.media.settings')).width(17).height(17)
+          .fillColor($r('app.color.text_secondary'))
+      }
+      .width(36).height(36).backgroundColor($r('app.color.ring_track')).borderRadius(18)
+      .onClick(() => this.showServiceSettings = !this.showServiceSettings)
+    }.width('100%')
+  }
+
+  @Builder
+  private conversationHistoryCard() {
+    if (this.showConversationHistory && this.conversationHistory.length > 0) {
+      Column({ space: 10 }) {
+        Row() {
+          Column({ space: 2 }) {
+            Text('历史对话').fontSize(16).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary')).width('100%')
+            Text('打开后可继续对话和执行原计划')
+              .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
+          }.layoutWeight(1)
+          Button('关闭').height(30).fontSize(10).borderRadius(15)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .onClick(() => this.showConversationHistory = false)
+        }.width('100%')
+        ForEach(this.conversationHistory, (item: AiConversationSummary) => {
+          Row({ space: 10 }) {
+            Column({ space: 4 }) {
+              Text(item.title).fontSize(13).fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.text_primary')).maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+              Text(`${this.formatConversationTime(item.updatedAt)} · ${item.messageCount} 条消息 · ` +
+                `${item.stepCount} 个步骤`)
+                .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+            }.layoutWeight(1)
+            Button('打开').width(54).height(32).fontSize(10).borderRadius(16)
+              .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+              .onClick(() => this.openArchivedConversation(item.id))
+          }
+          .width('100%').padding(11).backgroundColor($r('app.color.ring_track')).borderRadius(13)
+        }, (item: AiConversationSummary) => item.id)
+      }
+      .width('100%').padding(14).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(18)
+    }
+  }
+
+  @Builder
+  private serviceModeChip(label: string, mode: string, green: boolean) {
+    Text(label)
+      .layoutWeight(1).height(36).fontSize(12).fontWeight(FontWeight.Medium)
+      .fontColor(this.serviceMode === mode ? (green ? Color.Black : Color.White) :
+        $r('app.color.text_secondary'))
+      .textAlign(TextAlign.Center)
+      .backgroundColor(this.serviceMode === mode ?
+        (green ? $r('app.color.primary_green') : $r('app.color.primary_red')) :
+        $r('app.color.ring_track'))
+      .borderRadius(18)
+      .onClick(() => {
+        this.serviceMode = mode;
+        this.errorMessage = '';
+      })
+  }
+
+  @Builder
+  private serviceCard() {
+    if (this.showServiceSettings) {
+      Column({ space: 10 }) {
+        Column({ space: 3 }) {
+          Text('AI 服务').fontSize(16).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          Text(this.serviceMode === 'deepseek' ?
+            '多轮智能体模式；密钥仅在本次运行中保留' :
+            '代理模式只支持首次计划生成')
+            .fontSize(11).fontColor($r('app.color.text_tertiary')).width('100%')
+        }.width('100%')
+
+        Row({ space: 8 }) {
+          this.serviceModeChip('DeepSeek 智能体', 'deepseek', true)
+          this.serviceModeChip('安全代理', 'proxy', false)
+        }.width('100%')
+
+        if (this.serviceMode === 'deepseek') {
+          TextInput({ text: this.apiKey, placeholder: '输入 DeepSeek API Key' })
+            .type(InputType.Password).width('100%').height(42).fontSize(13)
+            .fontColor($r('app.color.text_primary')).placeholderColor($r('app.color.text_tertiary'))
+            .backgroundColor($r('app.color.ring_track')).borderRadius(12)
+            .onChange((value: string) => this.apiKey = value)
+          Row({ space: 8 }) {
+            Text('V4 Flash · 日常').layoutWeight(1).height(34).fontSize(11)
+              .fontColor(this.deepSeekModel === 'deepseek-v4-flash' ? Color.Black :
+                $r('app.color.text_secondary'))
+              .textAlign(TextAlign.Center)
+              .backgroundColor(this.deepSeekModel === 'deepseek-v4-flash' ?
+                $r('app.color.primary_green') : $r('app.color.ring_track'))
+              .borderRadius(17).onClick(() => this.deepSeekModel = 'deepseek-v4-flash')
+            Text('V4 Pro · 复杂规划').layoutWeight(1).height(34).fontSize(11)
+              .fontColor(this.deepSeekModel === 'deepseek-v4-pro' ? Color.Black :
+                $r('app.color.text_secondary'))
+              .textAlign(TextAlign.Center)
+              .backgroundColor(this.deepSeekModel === 'deepseek-v4-pro' ?
+                $r('app.color.primary_green') : $r('app.color.ring_track'))
+              .borderRadius(17).onClick(() => this.deepSeekModel = 'deepseek-v4-pro')
+          }.width('100%')
+          Text('直连密钥可能被调试或逆向获取；退出 App 后需重新输入。')
+            .width('100%').fontSize(10).fontColor($r('app.color.primary_red'))
+        } else {
+          TextInput({ text: this.endpoint, placeholder: 'https://你的域名/plan' })
+            .width('100%').height(42).fontSize(13)
+            .fontColor($r('app.color.text_primary')).placeholderColor($r('app.color.text_tertiary'))
+            .backgroundColor($r('app.color.ring_track')).borderRadius(12)
+            .onChange((value: string) => this.endpoint = value)
+          Button('保存代理地址').width('100%').height(38).fontSize(12)
+            .backgroundColor($r('app.color.primary_red')).fontColor(Color.White).borderRadius(19)
+            .onClick(() => this.saveEndpoint())
+        }
+        Button('完成配置').width('100%').height(36).fontSize(12)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+          .borderRadius(18).onClick(() => {
+            if (this.serviceMode === 'deepseek' && this.apiKey.trim().length < 10) {
+              this.errorMessage = '请先填写 DeepSeek API Key';
+              return;
+            }
+            this.showServiceSettings = false;
+            this.errorMessage = '';
+          })
+      }
+      .width('100%').padding(16).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(18)
+    }
+  }
+
+  @Builder
+  private contextCard() {
+    Row({ space: 8 }) {
+      Column({ space: 3 }) {
+        Text('今日专注').fontSize(10).fontColor($r('app.color.text_tertiary'))
+        Text(this.formatSeconds(this.todayWorkSeconds)).fontSize(15).fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.primary_red'))
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      Column({ space: 3 }) {
+        Text('完成番茄').fontSize(10).fontColor($r('app.color.text_tertiary'))
+        Text(`${this.todayCompletedSessions}/${this.dailyTarget}`).fontSize(15).fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.primary_green'))
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      Column({ space: 3 }) {
+        Text('当前任务').fontSize(10).fontColor($r('app.color.text_tertiary'))
+        Text(this.currentTask.length > 0 ? this.currentTask : '未设置').fontSize(12)
+          .fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      }.layoutWeight(2).alignItems(HorizontalAlign.Start)
+    }
+    .width('100%').padding(12).backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(14)
+  }
+
+  @Builder
+  private reviewCard() {
+    if (this.needsReview) {
+      Column({ space: 8 }) {
+        Text(`已记录完成：${this.lastCompletedStepTitle || '计划步骤'}`)
+          .fontSize(13).fontWeight(FontWeight.Bold).fontColor($r('app.color.primary_green')).width('100%')
+        Text('让智能体读取最新数据，检查后续安排是否仍然合理。')
+          .fontSize(11).fontColor($r('app.color.text_secondary')).width('100%')
+        Button(this.isLoading ? '正在复盘…' : '复盘并调整后续计划')
+          .width('100%').height(38).fontSize(12).enabled(!this.isLoading)
+          .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(19)
+          .onClick(() => this.reviewCompletedStep())
+      }
+      .width('100%').padding(14).backgroundColor('#2065FE08').borderRadius(16)
+    }
+  }
+
+  @Builder
+  private inputCard() {
+    Column({ space: 12 }) {
+      Column({ space: 3 }) {
+        Text(this.planSteps.length > 0 ? '提出新目标或整体重排' : '你想完成什么？')
+          .fontSize(17).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary')).width('100%')
+        Text('智能体会参考你的真实专注历史，而不是只看这一句话')
+          .fontSize(11).fontColor($r('app.color.text_tertiary')).width('100%')
+      }.width('100%')
+      TextArea({ text: this.goal, placeholder: '例如：今晚完成课程报告大纲并找到 3 篇参考资料' })
+        .width('100%').height(92).fontSize(14).fontColor($r('app.color.text_primary'))
+        .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
+        .borderRadius(14).padding(12).onChange((value: string) => this.goal = value)
+      Scroll() {
+        Row({ space: 8 }) {
+          ForEach(this.examples, (example: string) => {
+            Text(example).fontSize(11).fontColor($r('app.color.text_secondary')).maxLines(1)
+              .padding({ left: 11, right: 11, top: 7, bottom: 7 })
+              .backgroundColor($r('app.color.ring_track')).borderRadius(14)
+              .onClick(() => this.goal = example)
+          }, (example: string) => example)
+        }
+      }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
+      Row({ space: 8 }) {
+        Text(`可用 ${this.formatMinutes(this.availableMinutes)}`)
+          .fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+        Button() { Image($r('app.media.minus')).width(13).height(13)
+          .fillColor($r('app.color.text_secondary')) }
+          .width(32).height(32).borderRadius(16).backgroundColor($r('app.color.ring_track'))
+          .onClick(() => this.changeAvailableMinutes(-this.workMinutes))
+        Button() { Image($r('app.media.plus')).width(13).height(13).fillColor(Color.Black) }
+          .width(32).height(32).borderRadius(16).backgroundColor($r('app.color.primary_green'))
+          .onClick(() => this.changeAvailableMinutes(this.workMinutes))
+      }.width('100%')
+      TextInput({ text: this.deadline, placeholder: '截止时间（可选，如：周五 18:00）' })
+        .width('100%').height(40).fontSize(12).fontColor($r('app.color.text_primary'))
+        .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
+        .borderRadius(12).onChange((value: string) => this.deadline = value)
+      Button(this.isLoading ? '智能体正在分析…' : '生成或重排计划')
+        .width('100%').height(46).fontSize(14).fontWeight(FontWeight.Bold).enabled(!this.isLoading)
+        .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(23)
+        .onClick(() => this.generatePlan())
+    }
+    .width('100%').padding(16).backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(18)
+  }
+
+  @Builder
+  private conversationCard() {
+    if (this.chatMessages.length > 0) {
+      Column({ space: 8 }) {
+        Row() {
+          Text('对话').fontSize(15).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
+          Blank()
+          if (this.lastTotalTokens > 0) {
+            Text(`本次 ${this.lastTotalTokens} tokens`).fontSize(9)
+              .fontColor($r('app.color.text_tertiary'))
+          }
+        }.width('100%')
+        ForEach(this.chatMessages, (message: AiChatMessage, index: number) => {
+          Row() {
+            if (message.role === 'user') { Blank().layoutWeight(1) }
+            Text(message.content).fontSize(12).lineHeight(18)
+              .fontColor(message.role === 'user' ? Color.Black : $r('app.color.text_primary'))
+              .padding({ left: 12, right: 12, top: 9, bottom: 9 })
+              .backgroundColor(message.role === 'user' ?
+                $r('app.color.primary_green') : $r('app.color.ring_track'))
+              .borderRadius(14).constraintSize({ maxWidth: '86%' })
+            if (message.role !== 'user') { Blank().layoutWeight(1) }
+          }.width('100%')
+        }, (message: AiChatMessage, index: number) => `${message.createdAt}-${index}`)
+      }
+      .width('100%').padding(14).backgroundColor($r('app.color.surface')).borderRadius(16)
+    }
+  }
+
+  @Builder
+  private followUpCard() {
+    if (this.planSteps.length > 0) {
+      Column({ space: 8 }) {
+        Text('继续调整').fontSize(14).fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary')).width('100%')
+        TextInput({ text: this.followUp, placeholder: '例如：第三步太难了，再拆细一点' })
+          .width('100%').height(42).fontSize(12).fontColor($r('app.color.text_primary'))
+          .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
+          .borderRadius(12).onChange((value: string) => this.followUp = value)
+        Row({ space: 8 }) {
+          Button('时间减半').layoutWeight(1).height(34).fontSize(10)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .borderRadius(17).onClick(() => this.followUp = '我的可用时间减半，请保留最重要的成果并重新安排。')
+          Button('拆得更细').layoutWeight(1).height(34).fontSize(10)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .borderRadius(17).onClick(() => this.followUp = '当前步骤太笼统，请拆成更小、更容易开始的动作。')
+          Button('发送').layoutWeight(1).height(34).fontSize(11).enabled(!this.isLoading)
+            .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+            .borderRadius(17).onClick(() => this.sendFollowUp())
+        }.width('100%')
+      }
+      .width('100%').padding(14).backgroundColor($r('app.color.surface')).borderRadius(16)
+    }
+  }
+
+  @Builder
+  private planCard(step: AiPlanStep, index: number) {
+    Column({ space: 9 }) {
+      Row({ space: 10 }) {
+        Button(step.completed ? '✓' : `${index + 1}`)
+          .width(30).height(30).fontSize(12).fontWeight(FontWeight.Bold)
+          .fontColor(step.completed ? Color.Black : $r('app.color.text_primary'))
+          .backgroundColor(step.completed ? $r('app.color.primary_green') : $r('app.color.ring_track'))
+          .borderRadius(15).onClick(() => this.toggleStepCompleted(index))
+        Column({ space: 3 }) {
+          Text(step.title).fontSize(15).fontWeight(FontWeight.Bold)
+            .fontColor(step.completed ? $r('app.color.text_tertiary') : $r('app.color.text_primary'))
+            .decoration({ type: step.completed ? TextDecorationType.LineThrough : TextDecorationType.None })
+            .width('100%')
+          Text(`${step.estimatedPomodoros} 个番茄${step.project.length > 0 ? ` · ${step.project}` : ''}`)
+            .fontSize(10).fontColor($r('app.color.primary_green')).width('100%')
+        }.layoutWeight(1)
+      }.width('100%')
+      if (step.note.length > 0) {
+        Text(step.note).fontSize(12).lineHeight(18).fontColor($r('app.color.text_secondary')).width('100%')
+      }
+      if (!step.completed) {
+        Button(this.canApplyStep ? '设为当前专注任务' : '当前轮结束后可使用')
+          .width('100%').height(36).fontSize(11).enabled(this.canApplyStep)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
+          .borderRadius(18).onClick(() => this.applyStep(step))
+      }
+    }
+    .width('100%').padding(14).backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: step.completed ? $r('app.color.primary_green') : $r('app.color.card_border') })
+    .borderRadius(16)
+  }
+
+  build() {
+    Column({ space: 12 }) {
+      this.pageHeader()
+      Scroll() {
+        Column({ space: 12 }) {
+          this.conversationHistoryCard()
+          this.serviceCard()
+          this.contextCard()
+          this.reviewCard()
+          this.inputCard()
+          if (this.errorMessage.length > 0) {
+            Text(this.errorMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_red'))
+              .padding(12).backgroundColor('#24FA2E69').borderRadius(12)
+          }
+          if (this.successMessage.length > 0) {
+            Text(this.successMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_green'))
+              .padding(12).backgroundColor('#2065FE08').borderRadius(12)
+          }
+          this.conversationCard()
+          if (this.planSteps.length > 0) {
+            Row() {
+              Text('执行计划').fontSize(16).fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary'))
+              Blank()
+              Text(`${this.getCompletedStepCount()}/${this.planSteps.length}`)
+                .fontSize(12).fontColor($r('app.color.primary_green'))
+            }.width('100%').padding({ left: 4, right: 4 })
+            if (this.summary.length > 0) {
+              Text(this.summary).width('100%').fontSize(12).lineHeight(19)
+                .fontColor($r('app.color.text_secondary')).padding(14)
+                .backgroundColor($r('app.color.surface')).borderRadius(16)
+            }
+            ForEach(this.planSteps, (step: AiPlanStep, index: number) => {
+              this.planCard(step, index)
+            }, (step: AiPlanStep, index: number) => `${index}-${step.title}`)
+          }
+          this.followUpCard()
+        }.width('100%').padding({ bottom: 20 })
+      }.scrollBar(BarState.Off).layoutWeight(1).width('100%')
+    }
+    .width('100%').height('100%').padding({ left: 12, right: 12, top: 10 })
+    .backgroundColor($r('app.color.background'))
+  }
+}

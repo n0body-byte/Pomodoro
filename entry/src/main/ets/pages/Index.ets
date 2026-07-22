@@ -12,6 +12,8 @@ import { Settings } from '../views/Settings';
 import { Statistics } from '../views/Statistics';
 import { Achievements } from '../views/Achievements';
 import { History } from '../views/History';
+import { AiPlanner } from '../views/AiPlanner';
+import { AiPlanStep } from '../utils/AiAgentModels';
 import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
@@ -149,6 +151,28 @@ struct Index {
     this.currentNote = this.currentNote.trim();
     this.showTaskEditor = false;
     await this.loadTodayStats();
+  }
+
+  private async applyAiPlanStep(step: AiPlanStep): Promise<void> {
+    if (this.isRunning || this.remainingSeconds !== this.totalSeconds) {
+      return;
+    }
+    this.currentTask = step.title;
+    this.currentProject = step.project;
+    this.currentTag = step.tag;
+    this.currentNote = step.note;
+    this.estimatedPomodoros = step.estimatedPomodoros;
+    await PreferencesHelper.saveTaskContext(this.getContext(), {
+      task: this.currentTask,
+      project: this.currentProject,
+      tag: this.currentTag,
+      note: this.currentNote,
+      estimatedPomodoros: this.estimatedPomodoros
+    });
+    this.currentTaskCompleted = await PreferencesHelper.getTaskCompletedSessions(
+      this.getContext(), this.currentTask, this.currentProject);
+    this.currentTabIndex = 0;
+    this.tabsController.changeIndex(0);
   }
 
   private openTaskEditor(): void {
@@ -344,9 +368,13 @@ struct Index {
     }
 
     try {
-      await this.persistPhaseRecord(completedWorkMode, completedDuration, completedDuration,
+      const saved = await this.persistPhaseRecord(completedWorkMode, completedDuration, completedDuration,
         completedAt, 'completed');
       await this.loadTodayStats();
+      if (saved && completedWorkMode && this.currentTaskCompleted >= this.estimatedPomodoros) {
+        await PreferencesHelper.markAiPlanStepCompleted(
+          this.getContext(), this.currentTask, this.currentProject);
+      }
       if (completedWorkMode && previousTodayCount < this.dailyTarget && this.todayCount >= this.dailyTarget) {
         this.triggerCelebration();
       }
@@ -491,6 +519,10 @@ struct Index {
           this.todayCount += 1;
           if (this.currentTask.length > 0) {
             this.currentTaskCompleted += 1;
+          }
+          if (this.currentTaskCompleted >= this.estimatedPomodoros) {
+            await PreferencesHelper.markAiPlanStepCompleted(
+              this.getContext(), this.currentTask, this.currentProject);
           }
         }
       } else if (action === 'partial') {
@@ -669,16 +701,34 @@ struct Index {
   }
 
   @Builder
+  tabBarAiPlanner() {
+    Column({ space: 1 }) {
+      Image($r('app.media.ai_plan'))
+        .width(18)
+        .height(18)
+        .fillColor(this.currentTabIndex === 1 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+      Text('AI 计划')
+        .fontSize(10)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.currentTabIndex === 1 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+    }
+    .alignItems(HorizontalAlign.Center)
+    .justifyContent(FlexAlign.Center)
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
   tabBarSettings() {
     Column({ space: 1 }) {
       Image($r('app.media.settings'))
         .width(18)
         .height(18)
-        .fillColor(this.currentTabIndex === 1 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+        .fillColor(this.currentTabIndex === 2 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
       Text('设置')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 1 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+        .fontColor(this.currentTabIndex === 2 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -692,11 +742,11 @@ struct Index {
       Image($r('app.media.statistics'))
         .width(18)
         .height(18)
-        .fillColor(this.currentTabIndex === 2 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+        .fillColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
       Text('统计')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 2 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+        .fontColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -710,11 +760,11 @@ struct Index {
       Image($r('app.media.achievement'))
         .width(18)
         .height(18)
-        .fillColor(this.currentTabIndex === 4 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+        .fillColor(this.currentTabIndex === 5 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
       Text('成就')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 4 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+        .fontColor(this.currentTabIndex === 5 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -728,11 +778,11 @@ struct Index {
       Image($r('app.media.history'))
         .width(18)
         .height(18)
-        .fillColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+        .fillColor(this.currentTabIndex === 4 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
       Text('历史')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+        .fontColor(this.currentTabIndex === 4 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -1002,6 +1052,24 @@ struct Index {
       .tabBar(this.tabBarTimer)
 
       TabContent() {
+        AiPlanner({
+          active: this.currentTabIndex === 1,
+          workMinutes: Math.max(1, Math.round(this.workDuration / 60)),
+          breakMinutes: Math.max(1, Math.round(this.breakDuration / 60)),
+          canApplyStep: !this.isRunning && this.remainingSeconds === this.totalSeconds,
+          todayWorkSeconds: this.todayWorkSeconds,
+          todayBreakSeconds: this.todayBreakSeconds,
+          todayCompletedSessions: this.todayCount,
+          dailyTarget: this.dailyTarget,
+          currentTask: this.currentTask,
+          currentProject: this.currentProject,
+          currentTaskCompleted: this.currentTaskCompleted,
+          onApplyStep: (step: AiPlanStep) => this.applyAiPlanStep(step)
+        })
+      }
+      .tabBar(this.tabBarAiPlanner)
+
+      TabContent() {
         Settings({
           isDarkMode: this.isDarkMode,
           soundName: this.soundName,
@@ -1048,20 +1116,20 @@ struct Index {
       .tabBar(this.tabBarSettings)
 
       TabContent() {
-        Statistics({ active: this.currentTabIndex === 2 })
+        Statistics({ active: this.currentTabIndex === 3 })
       }
       .tabBar(this.tabBarStatistics)
 
       TabContent() {
         History({
-          active: this.currentTabIndex === 3,
+          active: this.currentTabIndex === 4,
           onChanged: () => this.loadTodayStats()
         })
       }
       .tabBar(this.tabBarHistory)
 
       TabContent() {
-        Achievements({ active: this.currentTabIndex === 4 })
+        Achievements({ active: this.currentTabIndex === 5 })
       }
       .tabBar(this.tabBarAchievements)
     }

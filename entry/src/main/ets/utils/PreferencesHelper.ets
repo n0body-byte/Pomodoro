@@ -19,6 +19,10 @@ import {
   PREF_KEY_SOUND_VOLUME,
   PREF_KEY_AMBIENT_VOLUME,
   PREF_KEY_TASK_CONTEXT,
+  PREF_KEY_AI_SERVICE_ENDPOINT,
+  PREF_KEY_AI_AGENT_STATE,
+  PREF_KEY_AI_CONVERSATION_INDEX,
+  PREF_KEY_AI_CONVERSATION_PREFIX,
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET,
@@ -27,6 +31,7 @@ import {
   DEFAULT_SOUND_VOLUME,
   DEFAULT_AMBIENT_VOLUME
 } from '../common/Constants';
+import { AiAgentState, AiChatMessage, AiConversationSummary, AiPlan, AiPlanStep } from './AiAgentModels';
 
 export interface SessionRecord {
   id?: string;
@@ -579,5 +584,205 @@ export class PreferencesHelper {
     } catch {
       return defaultValue;
     }
+  }
+
+  static async saveAiServiceEndpoint(context: Context, endpoint: string): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AI_SERVICE_ENDPOINT, endpoint.trim());
+    await prefs.flush();
+  }
+
+  static async loadAiServiceEndpoint(context: Context): Promise<string> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_AI_SERVICE_ENDPOINT, '') as string;
+    } catch {
+      return '';
+    }
+  }
+
+  static async saveAiAgentState(context: Context, state: AiAgentState): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AI_AGENT_STATE, JSON.stringify(state));
+    await prefs.flush();
+  }
+
+  static async loadAiAgentState(context: Context): Promise<AiAgentState> {
+    const emptyMessages: AiChatMessage[] = [];
+    const emptySteps: AiPlanStep[] = [];
+    const emptyPlan: AiPlan = { summary: '', steps: emptySteps };
+    const emptyState: AiAgentState = {
+      id: '',
+      title: '',
+      createdAt: 0,
+      messages: emptyMessages,
+      plan: emptyPlan,
+      updatedAt: 0,
+      needsReview: false,
+      lastCompletedStepTitle: ''
+    };
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      const raw = await prefs.get(PREF_KEY_AI_AGENT_STATE, '');
+      if (typeof raw !== 'string' || raw.length === 0) {
+        return emptyState;
+      }
+      const state = JSON.parse(raw) as AiAgentState;
+      if (!Array.isArray(state.messages) || state.plan === undefined || !Array.isArray(state.plan.steps)) {
+        return emptyState;
+      }
+      let title = typeof state.title === 'string' ? state.title.trim() : '';
+      if (title.length === 0) {
+        for (const message of state.messages) {
+          if (message.role === 'user' && message.content.trim().length > 0) {
+            title = message.content.trim().substring(0, 24);
+            break;
+          }
+        }
+      }
+      return {
+        id: typeof state.id === 'string' && state.id.length > 0 ? state.id : `ai-${Date.now()}`,
+        title: title.length > 0 ? title : '未命名对话',
+        createdAt: typeof state.createdAt === 'number' && state.createdAt > 0 ?
+          state.createdAt : (state.updatedAt > 0 ? state.updatedAt : Date.now()),
+        messages: state.messages,
+        plan: state.plan,
+        updatedAt: state.updatedAt,
+        needsReview: state.needsReview === true,
+        lastCompletedStepTitle: typeof state.lastCompletedStepTitle === 'string' ?
+          state.lastCompletedStepTitle : ''
+      };
+    } catch {
+      return emptyState;
+    }
+  }
+
+  static async loadAiConversationHistory(context: Context): Promise<AiConversationSummary[]> {
+    const emptyHistory: AiConversationSummary[] = [];
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      const raw = await prefs.get(PREF_KEY_AI_CONVERSATION_INDEX, '');
+      if (typeof raw !== 'string' || raw.length === 0) {
+        return emptyHistory;
+      }
+      const history = JSON.parse(raw) as AiConversationSummary[];
+      if (!Array.isArray(history)) {
+        return emptyHistory;
+      }
+      return history;
+    } catch {
+      return emptyHistory;
+    }
+  }
+
+  static async archiveAiConversation(context: Context, state: AiAgentState): Promise<void> {
+    if (state.id.length === 0 || (state.messages.length === 0 && state.plan.steps.length === 0)) {
+      return;
+    }
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    const rawIndex = await prefs.get(PREF_KEY_AI_CONVERSATION_INDEX, '');
+    let oldHistory: AiConversationSummary[] = [];
+    if (typeof rawIndex === 'string' && rawIndex.length > 0) {
+      try {
+        const parsed = JSON.parse(rawIndex) as AiConversationSummary[];
+        if (Array.isArray(parsed)) {
+          oldHistory = parsed;
+        }
+      } catch {
+        oldHistory = [];
+      }
+    }
+    const history: AiConversationSummary[] = [{
+      id: state.id,
+      title: state.title.length > 0 ? state.title : '未命名对话',
+      createdAt: state.createdAt,
+      updatedAt: state.updatedAt,
+      messageCount: state.messages.length,
+      stepCount: state.plan.steps.length
+    }];
+    for (const item of oldHistory) {
+      if (item.id !== state.id && history.length < 20) {
+        history.push(item);
+      }
+    }
+    await prefs.put(`${PREF_KEY_AI_CONVERSATION_PREFIX}${state.id}`, JSON.stringify(state));
+    await prefs.put(PREF_KEY_AI_CONVERSATION_INDEX, JSON.stringify(history));
+    await prefs.flush();
+  }
+
+  static async loadArchivedAiConversation(context: Context, id: string): Promise<AiAgentState | undefined> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      const raw = await prefs.get(`${PREF_KEY_AI_CONVERSATION_PREFIX}${id}`, '');
+      if (typeof raw !== 'string' || raw.length === 0) {
+        return undefined;
+      }
+      const state = JSON.parse(raw) as AiAgentState;
+      if (!Array.isArray(state.messages) || state.plan === undefined || !Array.isArray(state.plan.steps)) {
+        return undefined;
+      }
+      return state;
+    } catch {
+      return undefined;
+    }
+  }
+
+  static async removeArchivedAiConversation(context: Context, id: string): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    const oldHistory = await PreferencesHelper.loadAiConversationHistory(context);
+    const history: AiConversationSummary[] = [];
+    for (const item of oldHistory) {
+      if (item.id !== id) {
+        history.push(item);
+      }
+    }
+    await prefs.delete(`${PREF_KEY_AI_CONVERSATION_PREFIX}${id}`);
+    await prefs.put(PREF_KEY_AI_CONVERSATION_INDEX, JSON.stringify(history));
+    await prefs.flush();
+  }
+
+  static async clearAiAgentState(context: Context): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.delete(PREF_KEY_AI_AGENT_STATE);
+    await prefs.flush();
+  }
+
+  static async markAiPlanStepCompleted(context: Context, task: string, project: string): Promise<void> {
+    if (task.length === 0) {
+      return;
+    }
+    const state = await PreferencesHelper.loadAiAgentState(context);
+    let matched = false;
+    const updatedSteps: AiPlanStep[] = [];
+    for (const step of state.plan.steps) {
+      if (!matched && !step.completed && step.title === task && step.project === project) {
+        updatedSteps.push({
+          title: step.title,
+          project: step.project,
+          tag: step.tag,
+          note: step.note,
+          estimatedPomodoros: step.estimatedPomodoros,
+          reason: step.reason,
+          completed: true
+        });
+        matched = true;
+      } else {
+        updatedSteps.push(step);
+      }
+    }
+    if (!matched) {
+      return;
+    }
+    const updatedPlan: AiPlan = { summary: state.plan.summary, steps: updatedSteps };
+    await PreferencesHelper.saveAiAgentState(context, {
+      id: state.id,
+      title: state.title,
+      createdAt: state.createdAt,
+      messages: state.messages,
+      plan: updatedPlan,
+      updatedAt: Date.now(),
+      needsReview: true,
+      lastCompletedStepTitle: task
+    });
   }
 }

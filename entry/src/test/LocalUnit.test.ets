@@ -31,6 +31,12 @@ export default function localUnitTest() {
       expect(TimerHelper.calculateRemainingSeconds(5000, 6000)).assertEqual(0);
     });
 
+    it('calculateRemainingSecondsRoundsUp', 0, () => {
+      expect(TimerHelper.calculateRemainingSeconds(5001, 5000)).assertEqual(1);
+      expect(TimerHelper.calculateRemainingSeconds(5999, 5000)).assertEqual(1);
+      expect(TimerHelper.calculateRemainingSeconds(6001, 5000)).assertEqual(2);
+    });
+
     it('completedWorkRecordCompatibility', 0, () => {
       const legacyRecord: SessionRecord = {
         date: '2026-07-21', workSeconds: 1500, completedAt: 1, type: 'work'
@@ -46,12 +52,29 @@ export default function localUnitTest() {
       expect(PreferencesHelper.isCompletedWorkRecord(breakRecord)).assertFalse();
     });
 
+    it('workRecordStatusMatrix', 0, () => {
+      const completedRecord: SessionRecord = {
+        date: '2026-07-22', workSeconds: 1500, completedAt: 4, type: 'work', status: 'completed'
+      };
+      const skippedRecord: SessionRecord = {
+        date: '2026-07-22', workSeconds: 0, completedAt: 5, type: 'work', status: 'skipped'
+      };
+      expect(PreferencesHelper.isCompletedWorkRecord(completedRecord)).assertTrue();
+      expect(PreferencesHelper.isCompletedWorkRecord(skippedRecord)).assertFalse();
+    });
+
     it('longBreakCadence', 0, () => {
       expect(TimerPlanHelper.isLongBreak(0, 4)).assertFalse();
       expect(TimerPlanHelper.isLongBreak(3, 4)).assertFalse();
       expect(TimerPlanHelper.isLongBreak(4, 4)).assertTrue();
       expect(TimerPlanHelper.getBreakDuration(4, 4, 300, 900)).assertEqual(900);
       expect(TimerPlanHelper.getBreakDuration(5, 4, 300, 900)).assertEqual(300);
+    });
+
+    it('longBreakDisabledForInvalidInterval', 0, () => {
+      expect(TimerPlanHelper.isLongBreak(4, 0)).assertFalse();
+      expect(TimerPlanHelper.isLongBreak(4, -1)).assertFalse();
+      expect(TimerPlanHelper.getBreakDuration(4, 0, 300, 900)).assertEqual(300);
     });
 
     it('separateAutoStartRules', 0, () => {

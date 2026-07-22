@@ -23,6 +23,10 @@ export const PREF_KEY_SOUND_ENABLED = 'soundEnabled';
 export const PREF_KEY_SOUND_VOLUME = 'soundVolume';
 export const PREF_KEY_AMBIENT_VOLUME = 'ambientVolume';
 export const PREF_KEY_TASK_CONTEXT = 'taskContext';
+export const PREF_KEY_AI_SERVICE_ENDPOINT = 'aiServiceEndpoint';
+export const PREF_KEY_AI_AGENT_STATE = 'aiAgentState';
+export const PREF_KEY_AI_CONVERSATION_INDEX = 'aiConversationIndex';
+export const PREF_KEY_AI_CONVERSATION_PREFIX = 'aiConversation_';
 
 export const DEFAULT_LONG_BREAK_SECONDS = 15 * 60;
 export const DEFAULT_LONG_BREAK_INTERVAL = 4;
