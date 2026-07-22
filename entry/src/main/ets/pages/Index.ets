@@ -9,9 +9,7 @@ import { NotificationHelper } from '../utils/NotificationHelper';
 import { TimerHelper } from '../utils/TimerHelper';
 import { TimerPlanHelper } from '../utils/TimerPlanHelper';
 import { Settings } from '../views/Settings';
-import { Statistics } from '../views/Statistics';
-import { Achievements } from '../views/Achievements';
-import { History } from '../views/History';
+import { Insights } from '../views/Insights';
 import { AiPlanner } from '../views/AiPlanner';
 import { AiPlanStep } from '../utils/AiAgentModels';
 import {
@@ -724,26 +722,8 @@ struct Index {
       Image($r('app.media.settings'))
         .width(18)
         .height(18)
-        .fillColor(this.currentTabIndex === 2 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
-      Text('设置')
-        .fontSize(10)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 2 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
-    }
-    .alignItems(HorizontalAlign.Center)
-    .justifyContent(FlexAlign.Center)
-    .width('100%')
-    .height('100%')
-  }
-
-  @Builder
-  tabBarStatistics() {
-    Column({ space: 1 }) {
-      Image($r('app.media.statistics'))
-        .width(18)
-        .height(18)
         .fillColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
-      Text('统计')
+      Text('设置')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.currentTabIndex === 3 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
@@ -755,34 +735,16 @@ struct Index {
   }
 
   @Builder
-  tabBarAchievements() {
+  tabBarInsights() {
     Column({ space: 1 }) {
-      Image($r('app.media.achievement'))
+      Image($r('app.media.statistics'))
         .width(18)
         .height(18)
-        .fillColor(this.currentTabIndex === 5 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
-      Text('成就')
+        .fillColor(this.currentTabIndex === 2 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+      Text('数据')
         .fontSize(10)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 5 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
-    }
-    .alignItems(HorizontalAlign.Center)
-    .justifyContent(FlexAlign.Center)
-    .width('100%')
-    .height('100%')
-  }
-
-  @Builder
-  tabBarHistory() {
-    Column({ space: 1 }) {
-      Image($r('app.media.history'))
-        .width(18)
-        .height(18)
-        .fillColor(this.currentTabIndex === 4 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
-      Text('历史')
-        .fontSize(10)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(this.currentTabIndex === 4 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
+        .fontColor(this.currentTabIndex === 2 ? $r('app.color.tab_selected') : $r('app.color.tab_unselected'))
     }
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
@@ -1070,6 +1032,14 @@ struct Index {
       .tabBar(this.tabBarAiPlanner)
 
       TabContent() {
+        Insights({
+          active: this.currentTabIndex === 2,
+          onHistoryChanged: () => this.loadTodayStats()
+        })
+      }
+      .tabBar(this.tabBarInsights)
+
+      TabContent() {
         Settings({
           isDarkMode: this.isDarkMode,
           soundName: this.soundName,
@@ -1114,24 +1084,6 @@ struct Index {
         })
       }
       .tabBar(this.tabBarSettings)
-
-      TabContent() {
-        Statistics({ active: this.currentTabIndex === 3 })
-      }
-      .tabBar(this.tabBarStatistics)
-
-      TabContent() {
-        History({
-          active: this.currentTabIndex === 4,
-          onChanged: () => this.loadTodayStats()
-        })
-      }
-      .tabBar(this.tabBarHistory)
-
-      TabContent() {
-        Achievements({ active: this.currentTabIndex === 5 })
-      }
-      .tabBar(this.tabBarAchievements)
     }
     .barHeight(56)
     .barBackgroundColor($r('app.color.tab_bar_bg'))
