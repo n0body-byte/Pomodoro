@@ -91,3 +91,13 @@ export interface AiAgentResult {
   usage: AiUsage;
   errorMessage: string;
 }
+
+export interface AiAgentDecision {
+  stage: string;
+  stageLabel: string;
+  title: string;
+  description: string;
+  action: string;
+  actionLabel: string;
+  usesAi: boolean;
+}

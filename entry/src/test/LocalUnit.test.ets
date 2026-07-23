@@ -3,7 +3,8 @@ import { PreferencesHelper, SessionRecord } from '../main/ets/utils/PreferencesH
 import { TimerHelper } from '../main/ets/utils/TimerHelper';
 import { TimerPlanHelper } from '../main/ets/utils/TimerPlanHelper';
 import { AiPlanInsightHelper } from '../main/ets/utils/AiPlanInsightHelper';
-import { AiPlanStep } from '../main/ets/utils/AiAgentModels';
+import { AiAgentDecisionHelper } from '../main/ets/utils/AiAgentDecisionHelper';
+import { AiPlanInsight, AiPlanStep } from '../main/ets/utils/AiAgentModels';
 
 export default function localUnitTest() {
   describe('localUnitTest', () => {
@@ -124,6 +125,69 @@ export default function localUnitTest() {
       expect(insight.remainingPomodoros).assertEqual(1);
       expect(insight.requiredMinutes).assertEqual(25);
       expect(insight.nextStepIndex).assertEqual(1);
+    });
+
+    it('agentDecisionRecoversFailedActionFirst', 0, () => {
+      const insight: AiPlanInsight = AiPlanInsightHelper.calculate([], 120, 25, 5);
+      const decision = AiAgentDecisionHelper.decide(insight, false, false, true, true, true, true, false);
+      expect(decision.stage).assertEqual('blocked');
+      expect(decision.action).assertEqual('retry');
+      expect(decision.usesAi).assertTrue();
+    });
+
+    it('agentDecisionReviewsCompletedStepBeforeExecution', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '整理资料', project: '报告', tag: '准备', note: '', estimatedPomodoros: 1,
+          reason: '', completed: true },
+        { title: '写出初稿', project: '报告', tag: '写作', note: '', estimatedPomodoros: 2,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 90, 25, 5);
+      const decision = AiAgentDecisionHelper.decide(insight, true, true, false, false, true, true, false);
+      expect(decision.stage).assertEqual('reviewing');
+      expect(decision.action).assertEqual('review');
+    });
+
+    it('agentDecisionReplansOverCapacity', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '完成报告', project: '报告', tag: '写作', note: '', estimatedPomodoros: 4,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 60, 25, 5);
+      const decision = AiAgentDecisionHelper.decide(insight, true, false, false, false, true, true, false);
+      expect(decision.stage).assertEqual('replanning');
+      expect(decision.action).assertEqual('compress');
+    });
+
+    it('agentDecisionAppliesNextStepWithoutAiCost', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '开始执行', project: '计划', tag: '行动', note: '', estimatedPomodoros: 1,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 60, 25, 5);
+      const decision = AiAgentDecisionHelper.decide(insight, true, false, false, false, true, true, false);
+      expect(decision.stage).assertEqual('ready');
+      expect(decision.action).assertEqual('apply_next');
+      expect(decision.usesAi).assertFalse();
+    });
+
+    it('agentDecisionRequestsServiceConfiguration', 0, () => {
+      const insight: AiPlanInsight = AiPlanInsightHelper.calculate([], 120, 25, 5);
+      const decision = AiAgentDecisionHelper.decide(insight, false, false, false, false, false, true, false);
+      expect(decision.stage).assertEqual('blocked');
+      expect(decision.action).assertEqual('configure');
+      expect(decision.usesAi).assertFalse();
+    });
+
+    it('agentDecisionKeepsExistingPlanExecutableOffline', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '离线执行', project: '计划', tag: '行动', note: '', estimatedPomodoros: 1,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 60, 25, 5);
+      const decision = AiAgentDecisionHelper.decide(insight, true, false, false, false, false, true, false);
+      expect(decision.stage).assertEqual('ready');
+      expect(decision.action).assertEqual('apply_next');
     });
   });
 }

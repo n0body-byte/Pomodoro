@@ -151,6 +151,35 @@ struct Index {
     await this.loadTodayStats();
   }
 
+  private hasTaskContent(): boolean {
+    return this.currentTask.length > 0 || this.currentProject.length > 0 ||
+      this.currentTag.length > 0 || this.currentNote.length > 0 ||
+      this.taskDraft.length > 0 || this.projectDraft.length > 0 ||
+      this.tagDraft.length > 0 || this.noteDraft.length > 0;
+  }
+
+  private async clearTaskContext(): Promise<void> {
+    this.currentTask = '';
+    this.currentProject = '';
+    this.currentTag = '';
+    this.currentNote = '';
+    this.estimatedPomodoros = 1;
+    this.currentTaskCompleted = 0;
+    this.taskDraft = '';
+    this.projectDraft = '';
+    this.tagDraft = '';
+    this.noteDraft = '';
+    this.estimateDraft = 1;
+    await PreferencesHelper.saveTaskContext(this.getContext(), {
+      task: '',
+      project: '',
+      tag: '',
+      note: '',
+      estimatedPomodoros: 1
+    });
+    this.showTaskEditor = false;
+  }
+
   private async applyAiPlanStep(step: AiPlanStep): Promise<void> {
     if (this.isRunning || this.remainingSeconds !== this.totalSeconds) {
       return;
@@ -757,9 +786,15 @@ struct Index {
     if (this.showTaskEditor) {
       Column() {
         Column({ space: 12 }) {
-          Text('设置本轮任务')
-            .fontSize(20).fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary')).width('100%')
+          Row({ space: 10 }) {
+            Text('设置本轮任务')
+              .fontSize(20).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary')).layoutWeight(1)
+            Button('清空任务').height(30).fontSize(10).borderRadius(15)
+              .enabled(this.hasTaskContent())
+              .backgroundColor('#24FA2E69').fontColor($r('app.color.primary_red'))
+              .onClick(() => this.clearTaskContext())
+          }.width('100%')
           TextInput({ text: this.taskDraft, placeholder: '这轮要完成什么？' })
             .height(44).backgroundColor($r('app.color.ring_track'))
             .onChange((value: string) => this.taskDraft = value)
@@ -777,13 +812,20 @@ struct Index {
           Row() {
             Text('预计番茄数').fontSize(13).fontColor($r('app.color.text_secondary'))
             Blank()
-            Button('-').width(32).height(32).borderRadius(16)
-              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            Button() {
+              Image($r('app.media.minus')).width(13).height(13)
+                .fillColor($r('app.color.text_secondary'))
+            }
+              .width(32).height(32).borderRadius(16).padding(0)
+              .backgroundColor($r('app.color.ring_track'))
               .onClick(() => this.estimateDraft = Math.max(1, this.estimateDraft - 1))
             Text(`${this.estimateDraft}`).width(46).textAlign(TextAlign.Center)
               .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.primary_red'))
-            Button('+').width(32).height(32).borderRadius(16)
-              .backgroundColor($r('app.color.primary_red')).fontColor(Color.White)
+            Button() {
+              Image($r('app.media.plus')).width(13).height(13).fillColor(Color.White)
+            }
+              .width(32).height(32).borderRadius(16).padding(0)
+              .backgroundColor($r('app.color.primary_red'))
               .onClick(() => this.estimateDraft = Math.min(20, this.estimateDraft + 1))
           }
           Row({ space: 10 }) {

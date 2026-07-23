@@ -1,7 +1,9 @@
 import { PreferencesHelper, SessionRecord } from '../utils/PreferencesHelper';
 import { AiPlanResult, AiPlannerService } from '../utils/AiPlannerService';
 import { AiPlanInsightHelper } from '../utils/AiPlanInsightHelper';
+import { AiAgentDecisionHelper } from '../utils/AiAgentDecisionHelper';
 import {
+  AiAgentDecision,
   AiAgentResult,
   AiAgentState,
   AiChatMessage,
@@ -48,6 +50,9 @@ export struct AiPlanner {
   @State conversationCreatedAt: number = 0;
   @State conversationHistory: AiConversationSummary[] = [];
   @State showConversationHistory: boolean = false;
+  @State pendingDeleteConversationId: string = '';
+  @State pendingDeleteConversationTitle: string = '';
+  @State lastFailedMessage: string = '';
   onApplyStep?: (step: AiPlanStep) => void;
 
   private examples: string[] = [
@@ -177,6 +182,7 @@ export struct AiPlanner {
     this.lastCompletedStepTitle = '';
     this.lastTotalTokens = 0;
     this.errorMessage = '';
+    this.lastFailedMessage = '';
     this.successMessage = '已开始新对话';
     await this.loadConversationHistory();
   }
@@ -198,9 +204,42 @@ export struct AiPlanner {
     this.followUp = '';
     this.lastTotalTokens = 0;
     this.errorMessage = '';
+    this.lastFailedMessage = '';
     this.successMessage = '已恢复历史对话，可以继续调整计划';
-    this.showConversationHistory = false;
+    this.closeConversationHistory();
     await this.loadConversationHistory();
+  }
+
+  private closeConversationHistory(): void {
+    this.showConversationHistory = false;
+    this.pendingDeleteConversationId = '';
+    this.pendingDeleteConversationTitle = '';
+  }
+
+  private requestDeleteConversation(item: AiConversationSummary): void {
+    this.pendingDeleteConversationId = item.id;
+    this.pendingDeleteConversationTitle = item.title;
+  }
+
+  private cancelDeleteConversation(): void {
+    this.pendingDeleteConversationId = '';
+    this.pendingDeleteConversationTitle = '';
+  }
+
+  private async confirmDeleteConversation(): Promise<void> {
+    const id = this.pendingDeleteConversationId;
+    if (id.length === 0) {
+      return;
+    }
+    try {
+      await PreferencesHelper.removeArchivedAiConversation(this.getContext(), id);
+      await this.loadConversationHistory();
+      this.cancelDeleteConversation();
+      this.errorMessage = '';
+      this.successMessage = '历史对话已删除';
+    } catch {
+      this.errorMessage = '删除历史对话失败，请稍后重试';
+    }
   }
 
   private changeAvailableMinutes(delta: number): void {
@@ -306,6 +345,20 @@ export struct AiPlanner {
       this.planSteps, this.availableMinutes, this.workMinutes, this.breakMinutes);
   }
 
+  private getAgentDecision(): AiAgentDecision {
+    return AiAgentDecisionHelper.decide(
+      this.getPlanInsight(), this.planSteps.length > 0, this.needsReview,
+      this.errorMessage.length > 0, this.lastFailedMessage.length > 0,
+      this.isServiceReady(), this.canApplyStep, this.isLoading);
+  }
+
+  private isServiceReady(): boolean {
+    if (this.serviceMode === 'deepseek') {
+      return this.apiKey.trim().length >= 10;
+    }
+    return this.endpoint.trim().length > 0;
+  }
+
   private applyNextStep(): void {
     const insight = this.getPlanInsight();
     if (insight.nextStepIndex < 0) {
@@ -324,6 +377,31 @@ export struct AiPlanner {
       `${insight.requiredMinutes} 分钟，但我现在只有 ${this.availableMinutes} 分钟。` +
       `请保留最有价值的可交付成果，压缩或合并后续步骤，并保留合理缓冲。`;
     await this.askAgent(message);
+  }
+
+  private async retryLastRequest(): Promise<void> {
+    if (this.lastFailedMessage.length === 0) {
+      this.errorMessage = '没有可以重试的智能体行动';
+      return;
+    }
+    await this.askAgent(this.lastFailedMessage);
+  }
+
+  private async runRecommendedAction(): Promise<void> {
+    const decision = this.getAgentDecision();
+    if (decision.action === 'retry') {
+      await this.retryLastRequest();
+    } else if (decision.action === 'configure') {
+      this.showServiceSettings = true;
+    } else if (decision.action === 'generate') {
+      await this.generatePlan();
+    } else if (decision.action === 'review') {
+      await this.reviewCompletedStep();
+    } else if (decision.action === 'compress') {
+      await this.requestPlanCompression();
+    } else if (decision.action === 'apply_next') {
+      this.applyNextStep();
+    }
   }
 
   private appendMessages(userText: string, assistantText: string): void {
@@ -362,42 +440,52 @@ export struct AiPlanner {
     this.isLoading = true;
     this.errorMessage = '';
     this.successMessage = '';
-    if (this.serviceMode === 'deepseek') {
-      const focusContext = await this.buildFocusContext();
-      const result: AiAgentResult = await AiPlannerService.continueDeepSeekAgent(
-        this.apiKey, this.deepSeekModel, normalized, this.chatMessages,
-        { summary: this.summary, steps: this.planSteps }, focusContext);
-      this.isLoading = false;
-      if (!result.success) {
-        this.errorMessage = result.errorMessage;
+    try {
+      if (this.serviceMode === 'deepseek') {
+        const focusContext = await this.buildFocusContext();
+        const result: AiAgentResult = await AiPlannerService.continueDeepSeekAgent(
+          this.apiKey, this.deepSeekModel, normalized, this.chatMessages,
+          { summary: this.summary, steps: this.planSteps }, focusContext);
+        if (!result.success) {
+          this.errorMessage = result.errorMessage;
+          this.lastFailedMessage = normalized;
+          return false;
+        }
+        this.appendMessages(normalized, result.reply);
+        this.summary = result.plan.summary;
+        this.planSteps = result.plan.steps;
+        this.lastTotalTokens = result.usage.totalTokens;
+        this.lastFailedMessage = '';
+        this.needsReview = false;
+        await this.saveAgentState(false);
+        return true;
+      }
+
+      if (this.chatMessages.length > 0) {
+        this.errorMessage = '安全代理模式暂未升级多轮协议，请使用 DeepSeek 直连';
+        this.lastFailedMessage = '';
         return false;
       }
-      this.appendMessages(normalized, result.reply);
+      const result: AiPlanResult = await AiPlannerService.createPlan(
+        this.endpoint, normalized, this.availableMinutes, this.deadline, this.workMinutes, this.breakMinutes);
+      if (!result.success) {
+        this.errorMessage = result.errorMessage;
+        this.lastFailedMessage = normalized;
+        return false;
+      }
       this.summary = result.plan.summary;
       this.planSteps = result.plan.steps;
-      this.lastTotalTokens = result.usage.totalTokens;
-      this.needsReview = false;
+      this.appendMessages(normalized, result.plan.summary);
+      this.lastFailedMessage = '';
       await this.saveAgentState(false);
       return true;
-    }
-
-    if (this.chatMessages.length > 0) {
+    } catch {
+      this.errorMessage = '智能体执行中断，请重试上次行动';
+      this.lastFailedMessage = normalized;
+      return false;
+    } finally {
       this.isLoading = false;
-      this.errorMessage = '安全代理模式暂未升级多轮协议，请使用 DeepSeek 直连';
-      return false;
     }
-    const result: AiPlanResult = await AiPlannerService.createPlan(
-      this.endpoint, normalized, this.availableMinutes, this.deadline, this.workMinutes, this.breakMinutes);
-    this.isLoading = false;
-    if (!result.success) {
-      this.errorMessage = result.errorMessage;
-      return false;
-    }
-    this.summary = result.plan.summary;
-    this.planSteps = result.plan.steps;
-    this.appendMessages(normalized, result.plan.summary);
-    await this.saveAgentState(false);
-    return true;
   }
 
   private async generatePlan(): Promise<void> {
@@ -463,6 +551,10 @@ export struct AiPlanner {
     return count;
   }
 
+  private hasCurrentConversation(): boolean {
+    return this.chatMessages.length > 0 || this.planSteps.length > 0;
+  }
+
   @Builder
   private pageHeader() {
     Row({ space: 10 }) {
@@ -481,18 +573,18 @@ export struct AiPlanner {
           .fontColor($r('app.color.text_tertiary')).width('100%')
       }.layoutWeight(1)
 
-      if (this.conversationHistory.length > 0) {
-        Button(`历史 ${this.conversationHistory.length}`).height(34).fontSize(10).borderRadius(17)
-          .backgroundColor(this.showConversationHistory ? $r('app.color.primary_green') :
-            $r('app.color.ring_track'))
-          .fontColor(this.showConversationHistory ? Color.Black : $r('app.color.text_secondary'))
-          .onClick(() => this.showConversationHistory = !this.showConversationHistory)
-      }
-      if (this.chatMessages.length > 0 || this.planSteps.length > 0) {
-        Button('新对话').height(34).fontSize(10).borderRadius(17)
-          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
-          .onClick(() => this.startNewConversation())
-      }
+      Button('历史')
+        .height(34).fontSize(10).borderRadius(17)
+        .backgroundColor(this.showConversationHistory ? $r('app.color.primary_green') :
+          $r('app.color.ring_track'))
+        .fontColor(this.showConversationHistory ? Color.Black : $r('app.color.text_secondary'))
+        .onClick(() => {
+          if (this.showConversationHistory) {
+            this.closeConversationHistory();
+          } else {
+            this.showConversationHistory = true;
+          }
+        })
       Button() {
         Image($r('app.media.settings')).width(17).height(17)
           .fillColor($r('app.color.text_secondary'))
@@ -503,39 +595,130 @@ export struct AiPlanner {
   }
 
   @Builder
-  private conversationHistoryCard() {
-    if (this.showConversationHistory && this.conversationHistory.length > 0) {
-      Column({ space: 10 }) {
-        Row() {
-          Column({ space: 2 }) {
-            Text('历史对话').fontSize(16).fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.text_primary')).width('100%')
-            Text('打开后可继续对话和执行原计划')
-              .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
-          }.layoutWeight(1)
-          Button('关闭').height(30).fontSize(10).borderRadius(15)
-            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
-            .onClick(() => this.showConversationHistory = false)
-        }.width('100%')
-        ForEach(this.conversationHistory, (item: AiConversationSummary) => {
-          Row({ space: 10 }) {
-            Column({ space: 4 }) {
-              Text(item.title).fontSize(13).fontWeight(FontWeight.Medium)
-                .fontColor($r('app.color.text_primary')).maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-              Text(`${this.formatConversationTime(item.updatedAt)} · ${item.messageCount} 条消息 · ` +
-                `${item.completedStepCount === undefined ? 0 : item.completedStepCount}/${item.stepCount} 步`)
-                .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+  private conversationListOverlay() {
+    if (this.showConversationHistory) {
+      Stack({ alignContent: Alignment.Top }) {
+        Column()
+          .width('100%').height('100%')
+          .backgroundColor('#88000000')
+          .onClick(() => this.closeConversationHistory())
+
+        Column({ space: 12 }) {
+          Row() {
+            Column({ space: 2 }) {
+              Text('对话列表').fontSize(17).fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary')).width('100%')
+              Text('当前对话与历史对话统一保存在这里')
+                .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
             }.layoutWeight(1)
-            Button('打开').width(54).height(32).fontSize(10).borderRadius(16)
-              .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
-              .onClick(() => this.openArchivedConversation(item.id))
+            Button('关闭').height(30).fontSize(10).borderRadius(15)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.closeConversationHistory())
+          }.width('100%')
+
+          Button('新建对话')
+            .width('100%').height(38).fontSize(11).borderRadius(19)
+            .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+            .onClick(() => {
+              this.closeConversationHistory();
+              this.startNewConversation();
+            })
+
+          List({ space: 10 }) {
+          if (this.hasCurrentConversation()) {
+            ListItem() {
+              Row({ space: 10 }) {
+                Column({ space: 4 }) {
+                  Row({ space: 6 }) {
+                    Text('当前').fontSize(9).fontWeight(FontWeight.Bold).fontColor(Color.Black)
+                      .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+                      .backgroundColor($r('app.color.primary_green')).borderRadius(9)
+                    Text(this.conversationTitle.length > 0 ? this.conversationTitle :
+                      this.resolveConversationTitle())
+                      .fontSize(13).fontWeight(FontWeight.Medium)
+                      .fontColor($r('app.color.text_primary')).maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+                  }.width('100%')
+                  Text(`${this.chatMessages.length} 条消息 · ${this.getCompletedStepCount()}/${this.planSteps.length} 步`)
+                    .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+                }.layoutWeight(1)
+                Text('正在使用').fontSize(10).fontColor($r('app.color.primary_green'))
+              }
+              .width('100%').padding(12).backgroundColor($r('app.color.ring_track'))
+              .border({ width: 1, color: $r('app.color.primary_green') }).borderRadius(13)
+            }
           }
-          .width('100%').padding(11).backgroundColor($r('app.color.ring_track')).borderRadius(13)
-        }, (item: AiConversationSummary) => item.id)
+
+          ForEach(this.conversationHistory, (item: AiConversationSummary) => {
+            ListItem() {
+              Row({ space: 10 }) {
+                Column({ space: 4 }) {
+                  Text(item.title).fontSize(13).fontWeight(FontWeight.Medium)
+                    .fontColor($r('app.color.text_primary')).maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+                  Text(`${this.formatConversationTime(item.updatedAt)} · ${item.messageCount} 条消息 · ` +
+                    `${item.completedStepCount === undefined ? 0 : item.completedStepCount}/${item.stepCount} 步`)
+                    .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+                }.layoutWeight(1)
+                Row({ space: 6 }) {
+                  Button('打开').width(54).height(32).fontSize(10).borderRadius(16).padding(0)
+                    .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+                    .onClick(() => this.openArchivedConversation(item.id))
+                  Button('删除').width(54).height(32).fontSize(10).borderRadius(16).padding(0)
+                    .backgroundColor('#24FA2E69').fontColor($r('app.color.primary_red'))
+                    .onClick(() => this.requestDeleteConversation(item))
+                }
+              }
+              .width('100%').padding(11).backgroundColor($r('app.color.ring_track')).borderRadius(13)
+            }
+          }, (item: AiConversationSummary) => item.id)
+
+          if (!this.hasCurrentConversation() && this.conversationHistory.length === 0) {
+            ListItem() {
+              Column({ space: 7 }) {
+                Text('还没有对话').fontSize(14).fontWeight(FontWeight.Medium)
+                  .fontColor($r('app.color.text_primary'))
+                Text('创建计划或向智能体提问后，对话会自动保存在此列表中')
+                  .fontSize(10).fontColor($r('app.color.text_tertiary')).textAlign(TextAlign.Center)
+              }
+              .width('100%').padding({ top: 28, bottom: 28, left: 18, right: 18 })
+              .backgroundColor($r('app.color.ring_track')).borderRadius(13)
+            }
+          }
+          }
+          .layoutWeight(1).width('100%').scrollBar(BarState.Auto)
+        }
+        .width('94%').height('78%').margin({ top: 54 }).padding(16)
+        .backgroundColor($r('app.color.surface'))
+        .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(22)
+
+        if (this.pendingDeleteConversationId.length > 0) {
+          Stack({ alignContent: Alignment.Center }) {
+            Column()
+              .width('100%').height('100%')
+              .backgroundColor('#99000000')
+              .onClick(() => this.cancelDeleteConversation())
+
+            Column({ space: 14 }) {
+              Text('删除历史对话？').fontSize(18).fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary')).width('100%')
+              Text(`“${this.pendingDeleteConversationTitle}”删除后将无法恢复。`)
+                .fontSize(12).lineHeight(19).fontColor($r('app.color.text_secondary')).width('100%')
+              Row({ space: 10 }) {
+                Button('取消').layoutWeight(1).height(38).fontSize(11).borderRadius(19)
+                  .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+                  .onClick(() => this.cancelDeleteConversation())
+                Button('确认删除').layoutWeight(1).height(38).fontSize(11).borderRadius(19)
+                  .backgroundColor($r('app.color.primary_red')).fontColor(Color.White)
+                  .onClick(() => this.confirmDeleteConversation())
+              }.width('100%')
+            }
+            .width('82%').padding(18).backgroundColor($r('app.color.surface')).borderRadius(20)
+          }
+          .width('100%').height('100%').zIndex(31)
+        }
       }
-      .width('100%').padding(14).backgroundColor($r('app.color.surface'))
-      .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(18)
+      .width('100%').height('100%').zIndex(30)
     }
   }
 
@@ -649,20 +832,40 @@ export struct AiPlanner {
   }
 
   @Builder
-  private reviewCard() {
-    if (this.needsReview) {
-      Column({ space: 8 }) {
-        Text(`已记录完成：${this.lastCompletedStepTitle || '计划步骤'}`)
-          .fontSize(13).fontWeight(FontWeight.Bold).fontColor($r('app.color.primary_green')).width('100%')
-        Text('让智能体读取最新数据，检查后续安排是否仍然合理。')
-          .fontSize(11).fontColor($r('app.color.text_secondary')).width('100%')
-        Button(this.isLoading ? '正在复盘…' : '复盘并调整后续计划')
-          .width('100%').height(38).fontSize(12).enabled(!this.isLoading)
-          .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(19)
-          .onClick(() => this.reviewCompletedStep())
+  private agentActionCard(decision: AiAgentDecision) {
+    Column({ space: 9 }) {
+      Row() {
+        Text('智能体行动中心').fontSize(15).fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+        Blank()
+        Text(decision.stageLabel).fontSize(10).fontWeight(FontWeight.Bold)
+          .fontColor(decision.stage === 'blocked' || decision.stage === 'replanning' ?
+            $r('app.color.primary_red') : $r('app.color.primary_green'))
+          .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+          .backgroundColor($r('app.color.ring_track')).borderRadius(12)
+      }.width('100%')
+      Text(decision.title).fontSize(13).fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary')).width('100%')
+      Text(decision.description).fontSize(11).lineHeight(17)
+        .fontColor($r('app.color.text_secondary')).width('100%')
+      if (decision.action !== 'none') {
+        Button(decision.actionLabel)
+          .width('100%').height(38).fontSize(12)
+          .enabled(decision.action !== 'wait' && !this.isLoading)
+          .backgroundColor(decision.action === 'wait' ? $r('app.color.ring_track') :
+            $r('app.color.primary_green'))
+          .fontColor(decision.action === 'wait' ? $r('app.color.text_tertiary') : Color.Black)
+          .borderRadius(19).onClick(() => this.runRecommendedAction())
+        if (decision.usesAi) {
+          Text('此操作会调用当前 AI 服务并产生 Token 消耗')
+            .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+            .textAlign(TextAlign.Center)
+        }
       }
-      .width('100%').padding(14).backgroundColor('#2065FE08').borderRadius(16)
     }
+    .width('100%').padding(14).backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: decision.stage === 'blocked' || decision.stage === 'replanning' ?
+      $r('app.color.primary_red') : $r('app.color.card_border') }).borderRadius(16)
   }
 
   @Builder
@@ -857,47 +1060,51 @@ export struct AiPlanner {
   }
 
   build() {
-    Column({ space: 12 }) {
-      this.pageHeader()
-      Scroll() {
-        Column({ space: 12 }) {
-          this.conversationHistoryCard()
-          this.serviceCard()
-          this.contextCard()
-          this.reviewCard()
-          this.inputCard()
-          if (this.errorMessage.length > 0) {
-            Text(this.errorMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_red'))
-              .padding(12).backgroundColor('#24FA2E69').borderRadius(12)
-          }
-          if (this.successMessage.length > 0) {
-            Text(this.successMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_green'))
-              .padding(12).backgroundColor('#2065FE08').borderRadius(12)
-          }
-          this.conversationCard()
-          if (this.planSteps.length > 0) {
-            Row() {
-              Text('执行计划').fontSize(16).fontWeight(FontWeight.Bold)
-                .fontColor($r('app.color.text_primary'))
-              Blank()
-              Text(`${this.getCompletedStepCount()}/${this.planSteps.length}`)
-                .fontSize(12).fontColor($r('app.color.primary_green'))
-            }.width('100%').padding({ left: 4, right: 4 })
-            if (this.summary.length > 0) {
-              Text(this.summary).width('100%').fontSize(12).lineHeight(19)
-                .fontColor($r('app.color.text_secondary')).padding(14)
-                .backgroundColor($r('app.color.surface')).borderRadius(16)
+    Stack({ alignContent: Alignment.Top }) {
+      Column({ space: 12 }) {
+        this.pageHeader()
+        Scroll() {
+          Column({ space: 12 }) {
+            this.serviceCard()
+            this.contextCard()
+            this.agentActionCard(this.getAgentDecision())
+            this.inputCard()
+            if (this.errorMessage.length > 0) {
+              Text(this.errorMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_red'))
+                .padding(12).backgroundColor('#24FA2E69').borderRadius(12)
             }
-            this.planInsightCard(this.getPlanInsight())
-            ForEach(this.planSteps, (step: AiPlanStep, index: number) => {
-              this.planCard(step, index)
-            }, (step: AiPlanStep, index: number) => `${index}-${step.title}`)
-          }
-          this.followUpCard()
-        }.width('100%').padding({ bottom: 20 })
-      }.scrollBar(BarState.Off).layoutWeight(1).width('100%')
+            if (this.successMessage.length > 0) {
+              Text(this.successMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_green'))
+                .padding(12).backgroundColor('#2065FE08').borderRadius(12)
+            }
+            this.conversationCard()
+            if (this.planSteps.length > 0) {
+              Row() {
+                Text('执行计划').fontSize(16).fontWeight(FontWeight.Bold)
+                  .fontColor($r('app.color.text_primary'))
+                Blank()
+                Text(`${this.getCompletedStepCount()}/${this.planSteps.length}`)
+                  .fontSize(12).fontColor($r('app.color.primary_green'))
+              }.width('100%').padding({ left: 4, right: 4 })
+              if (this.summary.length > 0) {
+                Text(this.summary).width('100%').fontSize(12).lineHeight(19)
+                  .fontColor($r('app.color.text_secondary')).padding(14)
+                  .backgroundColor($r('app.color.surface')).borderRadius(16)
+              }
+              this.planInsightCard(this.getPlanInsight())
+              ForEach(this.planSteps, (step: AiPlanStep, index: number) => {
+                this.planCard(step, index)
+              }, (step: AiPlanStep, index: number) => `${index}-${step.title}`)
+            }
+            this.followUpCard()
+          }.width('100%').padding({ bottom: 20 })
+        }.scrollBar(BarState.Off).layoutWeight(1).width('100%')
+      }
+      .width('100%').height('100%').padding({ left: 12, right: 12, top: 10 })
+
+      this.conversationListOverlay()
     }
-    .width('100%').height('100%').padding({ left: 12, right: 12, top: 10 })
+    .width('100%').height('100%')
     .backgroundColor($r('app.color.background'))
   }
 }
