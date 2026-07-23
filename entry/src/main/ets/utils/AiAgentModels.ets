@@ -30,6 +30,11 @@ export interface AiAgentState {
   lastCompletedStepTitle: string;
   availableMinutes?: number;
   deadline?: string;
+  primaryGoal?: string;
+  memory?: AiAgentMemory;
+  goalDrift?: AiGoalDriftInsight;
+  lastAutoReviewAttemptTitle?: string;
+  lastExecutionReplanKey?: string;
 }
 
 export interface AiConversationSummary {
@@ -78,6 +83,32 @@ export interface AiPlanInsight {
   nextStepIndex: number;
 }
 
+export interface AiAgentMemory {
+  primaryGoal: string;
+  longTermSummary: string;
+  shortTermSummary: string;
+  updatedAt: number;
+}
+
+export interface AiGoalDriftInsight {
+  status: string;
+  title: string;
+  description: string;
+  similarityPercent: number;
+}
+
+export interface AiExecutionInsight {
+  status: string;
+  title: string;
+  description: string;
+  expectedMinutes: number;
+  actualMinutes: number;
+  varianceMinutes: number;
+  variancePercent: number;
+  matchedSessions: number;
+  shouldReplan: boolean;
+}
+
 export interface AiUsage {
   promptTokens: number;
   completionTokens: number;
@@ -100,4 +131,6 @@ export interface AiAgentDecision {
   action: string;
   actionLabel: string;
   usesAi: boolean;
+  reason: string;
+  expectedOutcome: string;
 }

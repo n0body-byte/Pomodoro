@@ -23,6 +23,7 @@ import {
   PREF_KEY_AI_AGENT_STATE,
   PREF_KEY_AI_CONVERSATION_INDEX,
   PREF_KEY_AI_CONVERSATION_PREFIX,
+  PREF_KEY_AI_AUTO_REVIEW,
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET,
@@ -31,7 +32,15 @@ import {
   DEFAULT_SOUND_VOLUME,
   DEFAULT_AMBIENT_VOLUME
 } from '../common/Constants';
-import { AiAgentState, AiChatMessage, AiConversationSummary, AiPlan, AiPlanStep } from './AiAgentModels';
+import {
+  AiAgentMemory,
+  AiAgentState,
+  AiChatMessage,
+  AiConversationSummary,
+  AiGoalDriftInsight,
+  AiPlan,
+  AiPlanStep
+} from './AiAgentModels';
 
 export interface SessionRecord {
   id?: string;
@@ -601,6 +610,21 @@ export class PreferencesHelper {
     }
   }
 
+  static async saveAiAutoReview(context: Context, enabled: boolean): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AI_AUTO_REVIEW, enabled);
+    await prefs.flush();
+  }
+
+  static async loadAiAutoReview(context: Context): Promise<boolean> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_AI_AUTO_REVIEW, false) as boolean;
+    } catch {
+      return false;
+    }
+  }
+
   static async saveAiAgentState(context: Context, state: AiAgentState): Promise<void> {
     const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
     await prefs.put(PREF_KEY_AI_AGENT_STATE, JSON.stringify(state));
@@ -640,6 +664,28 @@ export class PreferencesHelper {
           }
         }
       }
+      let memory: AiAgentMemory | undefined = undefined;
+      if (state.memory !== undefined) {
+        memory = {
+          primaryGoal: typeof state.memory.primaryGoal === 'string' ? state.memory.primaryGoal : '',
+          longTermSummary: typeof state.memory.longTermSummary === 'string' ?
+            state.memory.longTermSummary : '暂无长期专注数据。',
+          shortTermSummary: typeof state.memory.shortTermSummary === 'string' ?
+            state.memory.shortTermSummary : '暂无正在执行的计划。',
+          updatedAt: typeof state.memory.updatedAt === 'number' ? state.memory.updatedAt : 0
+        };
+      }
+      let goalDrift: AiGoalDriftInsight | undefined = undefined;
+      if (state.goalDrift !== undefined) {
+        goalDrift = {
+          status: typeof state.goalDrift.status === 'string' ? state.goalDrift.status : 'none',
+          title: typeof state.goalDrift.title === 'string' ? state.goalDrift.title : '目标保持一致',
+          description: typeof state.goalDrift.description === 'string' ?
+            state.goalDrift.description : '暂无需要处理的目标偏航。',
+          similarityPercent: typeof state.goalDrift.similarityPercent === 'number' ?
+            state.goalDrift.similarityPercent : 100
+        };
+      }
       return {
         id: typeof state.id === 'string' && state.id.length > 0 ? state.id : `ai-${Date.now()}`,
         title: title.length > 0 ? title : '未命名对话',
@@ -653,7 +699,14 @@ export class PreferencesHelper {
           state.lastCompletedStepTitle : '',
         availableMinutes: typeof state.availableMinutes === 'number' && state.availableMinutes > 0 ?
           Math.round(state.availableMinutes) : 120,
-        deadline: typeof state.deadline === 'string' ? state.deadline : ''
+        deadline: typeof state.deadline === 'string' ? state.deadline : '',
+        primaryGoal: typeof state.primaryGoal === 'string' ? state.primaryGoal : '',
+        memory: memory,
+        goalDrift: goalDrift,
+        lastAutoReviewAttemptTitle: typeof state.lastAutoReviewAttemptTitle === 'string' ?
+          state.lastAutoReviewAttemptTitle : '',
+        lastExecutionReplanKey: typeof state.lastExecutionReplanKey === 'string' ?
+          state.lastExecutionReplanKey : ''
       };
     } catch {
       return emptyState;
@@ -794,7 +847,12 @@ export class PreferencesHelper {
       needsReview: true,
       lastCompletedStepTitle: task,
       availableMinutes: state.availableMinutes,
-      deadline: state.deadline
+      deadline: state.deadline,
+      primaryGoal: state.primaryGoal,
+      memory: state.memory,
+      goalDrift: state.goalDrift,
+      lastAutoReviewAttemptTitle: state.lastAutoReviewAttemptTitle,
+      lastExecutionReplanKey: state.lastExecutionReplanKey
     });
   }
 }

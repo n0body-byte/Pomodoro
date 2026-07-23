@@ -4,7 +4,15 @@ import { TimerHelper } from '../main/ets/utils/TimerHelper';
 import { TimerPlanHelper } from '../main/ets/utils/TimerPlanHelper';
 import { AiPlanInsightHelper } from '../main/ets/utils/AiPlanInsightHelper';
 import { AiAgentDecisionHelper } from '../main/ets/utils/AiAgentDecisionHelper';
-import { AiPlanInsight, AiPlanStep } from '../main/ets/utils/AiAgentModels';
+import { AiAgentP1Helper, AiExecutionRecord } from '../main/ets/utils/AiAgentP1Helper';
+import {
+  AiExecutionInsight,
+  AiFocusContext,
+  AiGoalDriftInsight,
+  AiPlan,
+  AiPlanInsight,
+  AiPlanStep
+} from '../main/ets/utils/AiAgentModels';
 
 export default function localUnitTest() {
   describe('localUnitTest', () => {
@@ -188,6 +196,104 @@ export default function localUnitTest() {
       const decision = AiAgentDecisionHelper.decide(insight, true, false, false, false, false, true, false);
       expect(decision.stage).assertEqual('ready');
       expect(decision.action).assertEqual('apply_next');
+    });
+
+    it('agentMemoryCombinesLongAndShortTermContext', 0, () => {
+      const plan: AiPlan = { summary: '报告计划', steps: [
+        { title: '整理资料', project: '报告', tag: '准备', note: '', estimatedPomodoros: 1,
+          reason: '', completed: true },
+        { title: '完成初稿', project: '报告', tag: '写作', note: '', estimatedPomodoros: 2,
+          reason: '', completed: false }
+      ] };
+      const context: AiFocusContext = {
+        todayWorkSeconds: 1500, todayBreakSeconds: 300, todayCompletedSessions: 1, dailyTarget: 4,
+        sevenDayWorkSeconds: 7200, sevenDayCompletedSessions: 5, sevenDayAbandonedSessions: 1,
+        currentTask: '', currentProject: '', currentTaskCompleted: 0, workMinutes: 25, breakMinutes: 5,
+        recentSessionsSummary: '', availableMinutes: 120, deadline: '今晚', planRequiredMinutes: 55,
+        planBufferMinutes: 65, planProgressPercent: 33, planRiskStatus: 'on_track'
+      };
+      const memory = AiAgentP1Helper.buildMemory('完成课程报告', plan, context, '整理资料', []);
+      expect(memory.primaryGoal).assertEqual('完成课程报告');
+      expect(memory.longTermSummary.indexOf('120 分钟') >= 0).assertTrue();
+      expect(memory.shortTermSummary.indexOf('完成初稿') >= 0).assertTrue();
+    });
+
+    it('goalDriftKeepsWorkflowAdjustmentAligned', 0, () => {
+      const plan: AiPlan = { summary: '', steps: [
+        { title: '完成报告初稿', project: '课程报告', tag: '', note: '', estimatedPomodoros: 2,
+          reason: '', completed: false }
+      ] };
+      const drift = AiAgentP1Helper.detectGoalDrift('完成课程报告', '请把第三步拆细一点', plan);
+      expect(drift.status).assertEqual('aligned');
+    });
+
+    it('goalDriftDetectsUnrelatedInstruction', 0, () => {
+      const plan: AiPlan = { summary: '', steps: [
+        { title: '完成报告初稿', project: '课程报告', tag: '', note: '', estimatedPomodoros: 2,
+          reason: '', completed: false }
+      ] };
+      const drift = AiAgentP1Helper.detectGoalDrift('完成课程报告', '帮我安排周末跑步和买菜', plan);
+      expect(drift.status).assertEqual('possible');
+    });
+
+    it('executionInsightDetectsOverrun', 0, () => {
+      const plan: AiPlan = { summary: '', steps: [
+        { title: '整理资料', project: '报告', tag: '', note: '', estimatedPomodoros: 1,
+          reason: '', completed: true }
+      ] };
+      const records: AiExecutionRecord[] = [
+        { completedAt: 200, workSeconds: 2400, type: 'work', status: 'completed',
+          task: '整理资料', project: '报告' }
+      ];
+      const execution = AiAgentP1Helper.analyzeExecution(plan, records, 100, 25);
+      expect(execution.status).assertEqual('overrun');
+      expect(execution.variancePercent).assertEqual(60);
+      expect(execution.shouldReplan).assertTrue();
+    });
+
+    it('executionInsightAcceptsSmallVariance', 0, () => {
+      const plan: AiPlan = { summary: '', steps: [
+        { title: '整理资料', project: '报告', tag: '', note: '', estimatedPomodoros: 1,
+          reason: '', completed: true }
+      ] };
+      const records: AiExecutionRecord[] = [
+        { completedAt: 200, workSeconds: 1620, type: 'work', status: 'completed',
+          task: '整理资料', project: '报告' }
+      ];
+      const execution = AiAgentP1Helper.analyzeExecution(plan, records, 100, 25);
+      expect(execution.status).assertEqual('on_track');
+      expect(execution.shouldReplan).assertFalse();
+    });
+
+    it('agentDecisionPrioritizesGoalAlignment', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '完成报告', project: '报告', tag: '', note: '', estimatedPomodoros: 1,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 60, 25, 5);
+      const drift: AiGoalDriftInsight = {
+        status: 'possible', title: '可能偏移', description: '需要校准', similarityPercent: 0
+      };
+      const decision = AiAgentDecisionHelper.decide(
+        insight, true, false, false, false, true, true, false, drift);
+      expect(decision.action).assertEqual('align_goal');
+    });
+
+    it('agentDecisionReplansFromExecutionVariance', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '完成报告', project: '报告', tag: '', note: '', estimatedPomodoros: 1,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 60, 25, 5);
+      const drift: AiGoalDriftInsight = AiAgentP1Helper.emptyDrift();
+      const execution: AiExecutionInsight = {
+        status: 'overrun', title: '执行超时', description: '需要重排', expectedMinutes: 25,
+        actualMinutes: 40, varianceMinutes: 15, variancePercent: 60, matchedSessions: 1,
+        shouldReplan: true
+      };
+      const decision = AiAgentDecisionHelper.decide(
+        insight, true, false, false, false, true, true, false, drift, execution);
+      expect(decision.action).assertEqual('replan_variance');
     });
   });
 }

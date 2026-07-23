@@ -1,8 +1,11 @@
 import { http } from '@kit.NetworkKit';
 import {
   AiAgentResult,
+  AiAgentMemory,
   AiChatMessage,
+  AiExecutionInsight,
   AiFocusContext,
+  AiGoalDriftInsight,
   AiPlan,
   AiPlanStep,
   AiUsage
@@ -225,7 +228,9 @@ export class AiPlannerService {
     };
   }
 
-  private static buildAgentSystemPrompt(context: AiFocusContext, currentPlan: AiPlan): string {
+  private static buildAgentSystemPrompt(context: AiFocusContext, currentPlan: AiPlan,
+    memory: AiAgentMemory, goalDrift: AiGoalDriftInsight,
+    execution: AiExecutionInsight): string {
     return `你是番茄钟 App 内的个人执行智能体。你必须结合用户真实专注数据持续调整计划。\n` +
       `你每次只能输出 JSON，不要输出 Markdown。JSON 格式为：\n` +
       `{"reply":"给用户的简短中文回复","summary":"当前计划思路",` +
@@ -233,6 +238,12 @@ export class AiPlannerService {
       `"note":"完成标准","estimatedPomodoros":1,"reason":"安排原因","completed":false}]}\n` +
       `必须返回完整的当前计划，而不是只返回变更部分。最多 12 步，每步 1 到 20 个番茄。` +
       `保留已经完成且仍相关的步骤；用户要求调整时应重新估算。不要把休息列为任务。\n` +
+      `长期与短期记忆：${JSON.stringify(memory)}\n` +
+      `目标偏移判断：${JSON.stringify(goalDrift)}\n` +
+      `执行偏差判断：${JSON.stringify(execution)}\n` +
+      `记忆中的 primaryGoal 是当前主目标。若目标偏移状态为 possible 或 changed，` +
+      `不要静默替换主目标；优先保留主目标，只吸收与其一致的调整，并在 reply 中提醒用户。` +
+      `若执行偏差要求重排，必须根据真实耗时校准未完成步骤的估时、顺序和缓冲，已完成步骤不得改回未完成。\n` +
       `真实专注上下文：${JSON.stringify(context)}\n` +
       `当前计划：${JSON.stringify(currentPlan)}`;
   }
@@ -369,7 +380,9 @@ export class AiPlannerService {
   }
 
   static async continueDeepSeekAgent(apiKey: string, model: string, userMessage: string,
-    history: AiChatMessage[], currentPlan: AiPlan, context: AiFocusContext): Promise<AiAgentResult> {
+    history: AiChatMessage[], currentPlan: AiPlan, context: AiFocusContext,
+    memory: AiAgentMemory, goalDrift: AiGoalDriftInsight,
+    execution: AiExecutionInsight): Promise<AiAgentResult> {
     const normalizedKey = apiKey.trim();
     const normalizedMessage = userMessage.trim();
     if (normalizedKey.length < 10) {
@@ -381,7 +394,7 @@ export class AiPlannerService {
     const selectedModel = model === 'deepseek-v4-pro' ? 'deepseek-v4-pro' : 'deepseek-v4-flash';
     const messages: DeepSeekMessage[] = [{
       role: 'system',
-      content: AiPlannerService.buildAgentSystemPrompt(context, currentPlan)
+      content: AiPlannerService.buildAgentSystemPrompt(context, currentPlan, memory, goalDrift, execution)
     }];
     const startIndex = Math.max(0, history.length - 16);
     for (let index = startIndex; index < history.length; index++) {

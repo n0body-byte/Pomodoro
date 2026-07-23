@@ -2,13 +2,17 @@ import { PreferencesHelper, SessionRecord } from '../utils/PreferencesHelper';
 import { AiPlanResult, AiPlannerService } from '../utils/AiPlannerService';
 import { AiPlanInsightHelper } from '../utils/AiPlanInsightHelper';
 import { AiAgentDecisionHelper } from '../utils/AiAgentDecisionHelper';
+import { AiAgentP1Helper, AiExecutionRecord } from '../utils/AiAgentP1Helper';
 import {
   AiAgentDecision,
+  AiAgentMemory,
   AiAgentResult,
   AiAgentState,
   AiChatMessage,
   AiConversationSummary,
+  AiExecutionInsight,
   AiFocusContext,
+  AiGoalDriftInsight,
   AiPlan,
   AiPlanInsight,
   AiPlanStep
@@ -53,6 +57,14 @@ export struct AiPlanner {
   @State pendingDeleteConversationId: string = '';
   @State pendingDeleteConversationTitle: string = '';
   @State lastFailedMessage: string = '';
+  @State primaryGoal: string = '';
+  @State agentMemory: AiAgentMemory = AiAgentP1Helper.emptyMemory();
+  @State goalDriftInsight: AiGoalDriftInsight = AiAgentP1Helper.emptyDrift();
+  @State executionInsight: AiExecutionInsight = AiAgentP1Helper.emptyExecution();
+  @State autoReviewEnabled: boolean = false;
+  @State lastAutoReviewAttemptTitle: string = '';
+  @State showAgentMemory: boolean = false;
+  @State lastExecutionReplanKey: string = '';
   onApplyStep?: (step: AiPlanStep) => void;
 
   private examples: string[] = [
@@ -63,8 +75,11 @@ export struct AiPlanner {
 
   async aboutToAppear(): Promise<void> {
     this.endpoint = await PreferencesHelper.loadAiServiceEndpoint(this.getContext());
+    this.autoReviewEnabled = await PreferencesHelper.loadAiAutoReview(this.getContext());
     await this.loadAgentState();
     await this.loadConversationHistory();
+    await this.refreshAgentAnalysis();
+    await this.tryAutoReview();
     this.showServiceSettings = this.apiKey.length === 0;
   }
 
@@ -72,6 +87,8 @@ export struct AiPlanner {
     if (this.active) {
       await this.loadAgentState();
       await this.loadConversationHistory();
+      await this.refreshAgentAnalysis();
+      await this.tryAutoReview();
     }
   }
 
@@ -117,6 +134,17 @@ export struct AiPlanner {
       this.availableMinutes = Math.round(state.availableMinutes);
     }
     this.deadline = typeof state.deadline === 'string' ? state.deadline : '';
+    this.primaryGoal = typeof state.primaryGoal === 'string' ? state.primaryGoal : '';
+    this.agentMemory = state.memory !== undefined ? state.memory : AiAgentP1Helper.emptyMemory();
+    if (this.primaryGoal.length === 0 && this.agentMemory.primaryGoal.length > 0) {
+      this.primaryGoal = this.agentMemory.primaryGoal;
+    }
+    this.goalDriftInsight = state.goalDrift !== undefined ?
+      state.goalDrift : AiAgentP1Helper.emptyDrift();
+    this.lastAutoReviewAttemptTitle = typeof state.lastAutoReviewAttemptTitle === 'string' ?
+      state.lastAutoReviewAttemptTitle : '';
+    this.lastExecutionReplanKey = typeof state.lastExecutionReplanKey === 'string' ?
+      state.lastExecutionReplanKey : '';
   }
 
   private async loadConversationHistory(): Promise<void> {
@@ -154,7 +182,12 @@ export struct AiPlanner {
       needsReview: this.needsReview,
       lastCompletedStepTitle: this.lastCompletedStepTitle,
       availableMinutes: this.availableMinutes,
-      deadline: this.deadline
+      deadline: this.deadline,
+      primaryGoal: this.primaryGoal,
+      memory: this.agentMemory,
+      goalDrift: this.goalDriftInsight,
+      lastAutoReviewAttemptTitle: this.lastAutoReviewAttemptTitle,
+      lastExecutionReplanKey: this.lastExecutionReplanKey
     };
   }
 
@@ -183,6 +216,12 @@ export struct AiPlanner {
     this.lastTotalTokens = 0;
     this.errorMessage = '';
     this.lastFailedMessage = '';
+    this.primaryGoal = '';
+    this.agentMemory = AiAgentP1Helper.emptyMemory();
+    this.goalDriftInsight = AiAgentP1Helper.emptyDrift();
+    this.executionInsight = AiAgentP1Helper.emptyExecution();
+    this.lastAutoReviewAttemptTitle = '';
+    this.lastExecutionReplanKey = '';
     this.successMessage = '已开始新对话';
     await this.loadConversationHistory();
   }
@@ -340,6 +379,64 @@ export struct AiPlanner {
     };
   }
 
+  private getExecutionReplanKey(insight: AiExecutionInsight): string {
+    return `${insight.expectedMinutes}-${insight.actualMinutes}-${insight.matchedSessions}`;
+  }
+
+  private async updateAgentAnalysis(context: AiFocusContext): Promise<void> {
+    const history = await PreferencesHelper.loadSessionHistory(this.getContext());
+    const records: AiExecutionRecord[] = [];
+    for (const record of history) {
+      records.push({
+        completedAt: record.completedAt,
+        workSeconds: record.workSeconds,
+        type: record.type,
+        status: record.status,
+        task: record.task,
+        project: record.project
+      });
+    }
+    this.agentMemory = AiAgentP1Helper.buildMemory(
+      this.primaryGoal, { summary: this.summary, steps: this.planSteps }, context,
+      this.lastCompletedStepTitle, this.chatMessages);
+    const execution = AiAgentP1Helper.analyzeExecution(
+      { summary: this.summary, steps: this.planSteps }, records,
+      this.conversationCreatedAt, this.workMinutes);
+    if (execution.shouldReplan && this.getExecutionReplanKey(execution) === this.lastExecutionReplanKey) {
+      execution.shouldReplan = false;
+      execution.title = '执行偏差已校准';
+      execution.description = '智能体已经按这批真实计时数据重排过计划，将等待新的执行记录。';
+    }
+    this.executionInsight = execution;
+  }
+
+  private async refreshAgentAnalysis(): Promise<void> {
+    const context = await this.buildFocusContext();
+    await this.updateAgentAnalysis(context);
+  }
+
+  private async toggleAutoReview(enabled: boolean): Promise<void> {
+    this.autoReviewEnabled = enabled;
+    await PreferencesHelper.saveAiAutoReview(this.getContext(), enabled);
+    if (enabled) {
+      this.successMessage = '已开启自动复盘；完成计划步骤后会调用 DeepSeek';
+      await this.tryAutoReview();
+    } else {
+      this.successMessage = '已关闭自动复盘';
+    }
+  }
+
+  private async tryAutoReview(): Promise<void> {
+    if (!this.autoReviewEnabled || this.serviceMode !== 'deepseek' || !this.isServiceReady() ||
+      !this.needsReview || this.lastCompletedStepTitle.length === 0 || this.isLoading ||
+      this.lastAutoReviewAttemptTitle === this.lastCompletedStepTitle) {
+      return;
+    }
+    this.lastAutoReviewAttemptTitle = this.lastCompletedStepTitle;
+    await this.saveAgentState(true);
+    await this.reviewCompletedStep();
+  }
+
   private getPlanInsight(): AiPlanInsight {
     return AiPlanInsightHelper.calculate(
       this.planSteps, this.availableMinutes, this.workMinutes, this.breakMinutes);
@@ -349,7 +446,13 @@ export struct AiPlanner {
     return AiAgentDecisionHelper.decide(
       this.getPlanInsight(), this.planSteps.length > 0, this.needsReview,
       this.errorMessage.length > 0, this.lastFailedMessage.length > 0,
-      this.isServiceReady(), this.canApplyStep, this.isLoading);
+      this.isServiceReady(), this.canApplyStep, this.isLoading,
+      this.goalDriftInsight, this.executionInsight);
+  }
+
+  private shouldShowAgentSuggestion(decision: AiAgentDecision): boolean {
+    return decision.action === 'retry' || decision.action === 'review' || decision.action === 'compress' ||
+      decision.action === 'replan_variance' || decision.action === 'align_goal';
   }
 
   private isServiceReady(): boolean {
@@ -379,6 +482,30 @@ export struct AiPlanner {
     await this.askAgent(message);
   }
 
+  private async alignWithPrimaryGoal(): Promise<void> {
+    if (this.primaryGoal.length === 0) {
+      this.errorMessage = '当前没有可用于校准的主目标';
+      return;
+    }
+    const message = `请以主目标“${this.primaryGoal}”为唯一方向，重新检查当前计划。` +
+      `只吸收最近指令中与主目标一致的调整，删除无关内容，并给出下一步。`;
+    if (await this.askAgent(message)) {
+      this.goalDriftInsight = AiAgentP1Helper.emptyDrift();
+      await this.saveAgentState(false);
+    }
+  }
+
+  private async requestExecutionReplan(): Promise<void> {
+    const key = this.getExecutionReplanKey(this.executionInsight);
+    const message = `真实执行数据表明：${this.executionInsight.description}` +
+      `请按实际速度重排剩余计划，保留已完成步骤，并重新设置估时和缓冲。`;
+    if (await this.askAgent(message)) {
+      this.lastExecutionReplanKey = key;
+      await this.refreshAgentAnalysis();
+      await this.saveAgentState(false);
+    }
+  }
+
   private async retryLastRequest(): Promise<void> {
     if (this.lastFailedMessage.length === 0) {
       this.errorMessage = '没有可以重试的智能体行动';
@@ -399,6 +526,10 @@ export struct AiPlanner {
       await this.reviewCompletedStep();
     } else if (decision.action === 'compress') {
       await this.requestPlanCompression();
+    } else if (decision.action === 'align_goal') {
+      await this.alignWithPrimaryGoal();
+    } else if (decision.action === 'replan_variance') {
+      await this.requestExecutionReplan();
     } else if (decision.action === 'apply_next') {
       this.applyNextStep();
     }
@@ -443,9 +574,15 @@ export struct AiPlanner {
     try {
       if (this.serviceMode === 'deepseek') {
         const focusContext = await this.buildFocusContext();
+        this.goalDriftInsight = this.planSteps.length > 0 ?
+          AiAgentP1Helper.detectGoalDrift(
+            this.primaryGoal, normalized, { summary: this.summary, steps: this.planSteps }) :
+          AiAgentP1Helper.emptyDrift();
+        await this.updateAgentAnalysis(focusContext);
         const result: AiAgentResult = await AiPlannerService.continueDeepSeekAgent(
           this.apiKey, this.deepSeekModel, normalized, this.chatMessages,
-          { summary: this.summary, steps: this.planSteps }, focusContext);
+          { summary: this.summary, steps: this.planSteps }, focusContext,
+          this.agentMemory, this.goalDriftInsight, this.executionInsight);
         if (!result.success) {
           this.errorMessage = result.errorMessage;
           this.lastFailedMessage = normalized;
@@ -457,6 +594,7 @@ export struct AiPlanner {
         this.lastTotalTokens = result.usage.totalTokens;
         this.lastFailedMessage = '';
         this.needsReview = false;
+        await this.refreshAgentAnalysis();
         await this.saveAgentState(false);
         return true;
       }
@@ -477,6 +615,7 @@ export struct AiPlanner {
       this.planSteps = result.plan.steps;
       this.appendMessages(normalized, result.plan.summary);
       this.lastFailedMessage = '';
+      await this.refreshAgentAnalysis();
       await this.saveAgentState(false);
       return true;
     } catch {
@@ -494,6 +633,9 @@ export struct AiPlanner {
       return;
     }
     const deadlineText = this.deadline.trim().length > 0 ? this.deadline.trim() : '未指定';
+    this.primaryGoal = this.goal.trim();
+    this.goalDriftInsight = AiAgentP1Helper.emptyDrift();
+    this.lastExecutionReplanKey = '';
     const message = `请制定或重新规划这个目标：${this.goal.trim()}。` +
       `我可用 ${this.availableMinutes} 分钟，截止时间：${deadlineText}。`;
     await this.askAgent(message);
@@ -508,9 +650,15 @@ export struct AiPlanner {
 
   private async reviewCompletedStep(): Promise<void> {
     const title = this.lastCompletedStepTitle.length > 0 ? this.lastCompletedStepTitle : '刚才的任务';
+    const executionKey = this.executionInsight.shouldReplan ?
+      this.getExecutionReplanKey(this.executionInsight) : '';
     const message = `我刚完成了“${title}”。请根据最新专注数据复盘完成情况，` +
       `判断后续计划是否需要调整，并告诉我下一轮最应该做什么。`;
-    await this.askAgent(message);
+    if (await this.askAgent(message) && executionKey.length > 0) {
+      this.lastExecutionReplanKey = executionKey;
+      await this.refreshAgentAnalysis();
+      await this.saveAgentState(false);
+    }
   }
 
   private applyStep(step: AiPlanStep): void {
@@ -533,12 +681,17 @@ export struct AiPlanner {
       }
     }
     this.planSteps = steps;
-    this.needsReview = true;
     const changed = this.planSteps[stepIndex];
     if (changed !== undefined && changed.completed) {
       this.lastCompletedStepTitle = changed.title;
+      this.lastAutoReviewAttemptTitle = '';
+      this.needsReview = true;
+    } else {
+      this.needsReview = false;
     }
-    await this.saveAgentState(true);
+    await this.refreshAgentAnalysis();
+    await this.saveAgentState(this.needsReview);
+    await this.tryAutoReview();
   }
 
   private getCompletedStepCount(): number {
@@ -757,6 +910,20 @@ export struct AiPlanner {
           this.serviceModeChip('安全代理', 'proxy', false)
         }.width('100%')
 
+        Row({ space: 10 }) {
+          Column({ space: 3 }) {
+            Text('完成步骤后自动复盘').fontSize(12).fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary')).width('100%')
+            Text('默认关闭；开启后会自动调用 DeepSeek，并产生 Token 消耗')
+              .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
+          }.layoutWeight(1)
+          Toggle({ type: ToggleType.Switch, isOn: this.autoReviewEnabled })
+            .selectedColor($r('app.color.primary_green'))
+            .enabled(this.serviceMode === 'deepseek')
+            .onChange((enabled: boolean) => this.toggleAutoReview(enabled))
+        }
+        .width('100%').padding(11).backgroundColor($r('app.color.ring_track')).borderRadius(12)
+
         if (this.serviceMode === 'deepseek') {
           TextInput({ text: this.apiKey, placeholder: '输入 DeepSeek API Key' })
             .type(InputType.Password).width('100%').height(42).fontSize(13)
@@ -835,7 +1002,7 @@ export struct AiPlanner {
   private agentActionCard(decision: AiAgentDecision) {
     Column({ space: 9 }) {
       Row() {
-        Text('智能体行动中心').fontSize(15).fontWeight(FontWeight.Bold)
+        Text('下一步建议').fontSize(15).fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary'))
         Blank()
         Text(decision.stageLabel).fontSize(10).fontWeight(FontWeight.Bold)
@@ -848,6 +1015,13 @@ export struct AiPlanner {
         .fontColor($r('app.color.text_primary')).width('100%')
       Text(decision.description).fontSize(11).lineHeight(17)
         .fontColor($r('app.color.text_secondary')).width('100%')
+      Column({ space: 4 }) {
+        Text(`为什么建议：${decision.reason}`).fontSize(10).lineHeight(16)
+          .fontColor($r('app.color.text_secondary')).width('100%')
+        Text(`执行后：${decision.expectedOutcome}`).fontSize(10).lineHeight(16)
+          .fontColor($r('app.color.text_tertiary')).width('100%')
+      }
+      .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(10)
       if (decision.action !== 'none') {
         Button(decision.actionLabel)
           .width('100%').height(38).fontSize(12)
@@ -866,6 +1040,48 @@ export struct AiPlanner {
     .width('100%').padding(14).backgroundColor($r('app.color.surface'))
     .border({ width: 1, color: decision.stage === 'blocked' || decision.stage === 'replanning' ?
       $r('app.color.primary_red') : $r('app.color.card_border') }).borderRadius(16)
+  }
+
+  @Builder
+  private agentMemoryCard() {
+    if (this.planSteps.length > 0 || this.primaryGoal.length > 0) {
+      Column({ space: 9 }) {
+        Row() {
+          Column({ space: 3 }) {
+            Text('智能体记忆').fontSize(14).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary')).width('100%')
+            Text(this.primaryGoal.length > 0 ? `主目标：${this.primaryGoal}` : '主目标尚未明确')
+              .fontSize(10).fontColor($r('app.color.text_secondary')).maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+          }.layoutWeight(1)
+          Button(this.showAgentMemory ? '收起' : '查看')
+            .height(30).fontSize(10).borderRadius(15)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .onClick(() => this.showAgentMemory = !this.showAgentMemory)
+        }.width('100%')
+        if (this.showAgentMemory) {
+          Column({ space: 8 }) {
+            Text('长期节奏').fontSize(10).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.primary_green')).width('100%')
+            Text(this.agentMemory.longTermSummary).fontSize(10).lineHeight(16)
+              .fontColor($r('app.color.text_secondary')).width('100%')
+            Text('本轮记忆').fontSize(10).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.primary_green')).width('100%')
+            Text(this.agentMemory.shortTermSummary).fontSize(10).lineHeight(16)
+              .fontColor($r('app.color.text_secondary')).width('100%')
+            if (this.executionInsight.status !== 'no_data') {
+              Text(this.executionInsight.title).fontSize(10).fontWeight(FontWeight.Bold)
+                .fontColor(this.executionInsight.shouldReplan ?
+                  $r('app.color.primary_red') : $r('app.color.primary_green')).width('100%')
+              Text(this.executionInsight.description).fontSize(10).lineHeight(16)
+                .fontColor($r('app.color.text_secondary')).width('100%')
+            }
+          }.width('100%')
+        }
+      }
+      .width('100%').padding(13).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(15)
+    }
   }
 
   @Builder
@@ -1067,7 +1283,10 @@ export struct AiPlanner {
           Column({ space: 12 }) {
             this.serviceCard()
             this.contextCard()
-            this.agentActionCard(this.getAgentDecision())
+            this.agentMemoryCard()
+            if (this.shouldShowAgentSuggestion(this.getAgentDecision())) {
+              this.agentActionCard(this.getAgentDecision())
+            }
             this.inputCard()
             if (this.errorMessage.length > 0) {
               Text(this.errorMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_red'))
