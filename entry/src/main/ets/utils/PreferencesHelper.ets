@@ -706,7 +706,8 @@ export class PreferencesHelper {
         lastAutoReviewAttemptTitle: typeof state.lastAutoReviewAttemptTitle === 'string' ?
           state.lastAutoReviewAttemptTitle : '',
         lastExecutionReplanKey: typeof state.lastExecutionReplanKey === 'string' ?
-          state.lastExecutionReplanKey : ''
+          state.lastExecutionReplanKey : '',
+        planSource: typeof state.planSource === 'string' ? state.planSource : 'none'
       };
     } catch {
       return emptyState;
@@ -852,7 +853,8 @@ export class PreferencesHelper {
       memory: state.memory,
       goalDrift: state.goalDrift,
       lastAutoReviewAttemptTitle: state.lastAutoReviewAttemptTitle,
-      lastExecutionReplanKey: state.lastExecutionReplanKey
+      lastExecutionReplanKey: state.lastExecutionReplanKey,
+      planSource: state.planSource
     });
   }
 }

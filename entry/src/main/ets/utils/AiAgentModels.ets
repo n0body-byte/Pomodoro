@@ -35,6 +35,7 @@ export interface AiAgentState {
   goalDrift?: AiGoalDriftInsight;
   lastAutoReviewAttemptTitle?: string;
   lastExecutionReplanKey?: string;
+  planSource?: string;
 }
 
 export interface AiConversationSummary {

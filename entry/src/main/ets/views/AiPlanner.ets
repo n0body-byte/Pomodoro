@@ -3,6 +3,7 @@ import { AiPlanResult, AiPlannerService } from '../utils/AiPlannerService';
 import { AiPlanInsightHelper } from '../utils/AiPlanInsightHelper';
 import { AiAgentDecisionHelper } from '../utils/AiAgentDecisionHelper';
 import { AiAgentP1Helper, AiExecutionRecord } from '../utils/AiAgentP1Helper';
+import { LocalFallbackPlanHelper } from '../utils/LocalFallbackPlanHelper';
 import {
   AiAgentDecision,
   AiAgentMemory,
@@ -65,6 +66,7 @@ export struct AiPlanner {
   @State lastAutoReviewAttemptTitle: string = '';
   @State showAgentMemory: boolean = false;
   @State lastExecutionReplanKey: string = '';
+  @State planSource: string = 'none';
   onApplyStep?: (step: AiPlanStep) => void;
 
   private examples: string[] = [
@@ -145,6 +147,9 @@ export struct AiPlanner {
       state.lastAutoReviewAttemptTitle : '';
     this.lastExecutionReplanKey = typeof state.lastExecutionReplanKey === 'string' ?
       state.lastExecutionReplanKey : '';
+    this.planSource = typeof state.planSource === 'string' ? state.planSource :
+      (state.plan.summary.indexOf('本地应急计划：') === 0 ? 'local' :
+        (state.plan.steps.length > 0 ? 'ai' : 'none'));
   }
 
   private async loadConversationHistory(): Promise<void> {
@@ -187,7 +192,8 @@ export struct AiPlanner {
       memory: this.agentMemory,
       goalDrift: this.goalDriftInsight,
       lastAutoReviewAttemptTitle: this.lastAutoReviewAttemptTitle,
-      lastExecutionReplanKey: this.lastExecutionReplanKey
+      lastExecutionReplanKey: this.lastExecutionReplanKey,
+      planSource: this.planSource
     };
   }
 
@@ -222,6 +228,7 @@ export struct AiPlanner {
     this.executionInsight = AiAgentP1Helper.emptyExecution();
     this.lastAutoReviewAttemptTitle = '';
     this.lastExecutionReplanKey = '';
+    this.planSource = 'none';
     this.successMessage = '已开始新对话';
     await this.loadConversationHistory();
   }
@@ -514,6 +521,41 @@ export struct AiPlanner {
     await this.askAgent(this.lastFailedMessage);
   }
 
+  private resolveFallbackGoal(): string {
+    if (this.primaryGoal.trim().length > 0) {
+      return this.primaryGoal.trim();
+    }
+    if (this.goal.trim().length > 0) {
+      return this.goal.trim();
+    }
+    return '完成当前最重要的任务';
+  }
+
+  private async createLocalFallbackPlan(): Promise<void> {
+    if (this.planSteps.length > 0) {
+      this.successMessage = '现有计划仍可离线执行，无需覆盖';
+      return;
+    }
+    const fallbackGoal = this.resolveFallbackGoal();
+    const requestText = this.lastFailedMessage.length > 0 ? this.lastFailedMessage :
+      `请为“${fallbackGoal}”制定计划。`;
+    const plan = LocalFallbackPlanHelper.create(
+      fallbackGoal, this.availableMinutes, this.deadline, this.workMinutes, this.breakMinutes);
+    this.primaryGoal = fallbackGoal;
+    this.summary = plan.summary;
+    this.planSteps = plan.steps;
+    this.planSource = 'local';
+    this.appendMessages(requestText, 'AI 服务暂时不可用，已生成明确标注的本地应急计划。' +
+      '该计划依据可用时间和番茄参数计算，不包含模型推理结果。');
+    this.errorMessage = '';
+    this.lastFailedMessage = '';
+    this.lastTotalTokens = 0;
+    this.needsReview = false;
+    await this.refreshAgentAnalysis();
+    await this.saveAgentState(false);
+    this.successMessage = '已生成本地应急计划，未调用 AI；联网后可继续优化';
+  }
+
   private async runRecommendedAction(): Promise<void> {
     const decision = this.getAgentDecision();
     if (decision.action === 'retry') {
@@ -591,6 +633,7 @@ export struct AiPlanner {
         this.appendMessages(normalized, result.reply);
         this.summary = result.plan.summary;
         this.planSteps = result.plan.steps;
+        this.planSource = 'ai';
         this.lastTotalTokens = result.usage.totalTokens;
         this.lastFailedMessage = '';
         this.needsReview = false;
@@ -613,6 +656,7 @@ export struct AiPlanner {
       }
       this.summary = result.plan.summary;
       this.planSteps = result.plan.steps;
+      this.planSource = 'ai';
       this.appendMessages(normalized, result.plan.summary);
       this.lastFailedMessage = '';
       await this.refreshAgentAnalysis();
@@ -1035,6 +1079,15 @@ export struct AiPlanner {
             .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
             .textAlign(TextAlign.Center)
         }
+        if (decision.action === 'retry' && this.planSteps.length === 0) {
+          Button('使用本地应急计划')
+            .width('100%').height(36).fontSize(11).enabled(!this.isLoading)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .borderRadius(18).onClick(() => this.createLocalFallbackPlan())
+          Text('不调用 AI；仅依据目标、可用时间和当前番茄参数生成基础执行步骤')
+            .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+            .textAlign(TextAlign.Center)
+        }
       }
     }
     .width('100%').padding(14).backgroundColor($r('app.color.surface'))
@@ -1226,6 +1279,15 @@ export struct AiPlanner {
           .width('100%').height(42).fontSize(12).fontColor($r('app.color.text_primary'))
           .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
           .borderRadius(12).onChange((value: string) => this.followUp = value)
+        if (this.planSource === 'local') {
+          Button('联网后让 AI 优化这份应急计划')
+            .width('100%').height(38).fontSize(11).enabled(!this.isLoading)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
+            .borderRadius(19).onClick(async () => {
+              this.followUp = '请检查当前本地应急计划，在不增加总番茄数的前提下优化步骤、交付物和风险预案。';
+              await this.sendFollowUp();
+            })
+        }
         Row({ space: 8 }) {
           Button('时间减半').layoutWeight(1).height(34).fontSize(10)
             .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
@@ -1302,6 +1364,15 @@ export struct AiPlanner {
                 Text('执行计划').fontSize(16).fontWeight(FontWeight.Bold)
                   .fontColor($r('app.color.text_primary'))
                 Blank()
+                if (this.planSource !== 'none') {
+                  Text(this.planSource === 'local' ? '本地应急' : '联网智能体')
+                    .fontSize(9).fontWeight(FontWeight.Bold)
+                    .fontColor(this.planSource === 'local' ?
+                      $r('app.color.primary_red') : $r('app.color.primary_green'))
+                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                    .backgroundColor($r('app.color.ring_track')).borderRadius(10)
+                    .margin({ right: 8 })
+                }
                 Text(`${this.getCompletedStepCount()}/${this.planSteps.length}`)
                   .fontSize(12).fontColor($r('app.color.primary_green'))
               }.width('100%').padding({ left: 4, right: 4 })

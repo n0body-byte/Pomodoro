@@ -5,6 +5,7 @@ import { TimerPlanHelper } from '../main/ets/utils/TimerPlanHelper';
 import { AiPlanInsightHelper } from '../main/ets/utils/AiPlanInsightHelper';
 import { AiAgentDecisionHelper } from '../main/ets/utils/AiAgentDecisionHelper';
 import { AiAgentP1Helper, AiExecutionRecord } from '../main/ets/utils/AiAgentP1Helper';
+import { LocalFallbackPlanHelper } from '../main/ets/utils/LocalFallbackPlanHelper';
 import {
   AiExecutionInsight,
   AiFocusContext,
@@ -294,6 +295,27 @@ export default function localUnitTest() {
       const decision = AiAgentDecisionHelper.decide(
         insight, true, false, false, false, true, true, false, drift, execution);
       expect(decision.action).assertEqual('replan_variance');
+    });
+
+    it('localFallbackFitsAvailableTime', 0, () => {
+      expect(LocalFallbackPlanHelper.calculateFittingPomodoros(120, 25, 5)).assertEqual(4);
+      expect(LocalFallbackPlanHelper.calculateFittingPomodoros(60, 25, 5)).assertEqual(2);
+      expect(LocalFallbackPlanHelper.calculateFittingPomodoros(24, 25, 5)).assertEqual(0);
+    });
+
+    it('localFallbackCreatesMinimalDeliverable', 0, () => {
+      const plan = LocalFallbackPlanHelper.create('完成课程报告', 25, '今晚', 25, 5);
+      expect(plan.steps.length).assertEqual(1);
+      expect(plan.steps[0].estimatedPomodoros).assertEqual(1);
+      expect(plan.summary.indexOf('未调用 AI') >= 0).assertTrue();
+    });
+
+    it('localFallbackReservesClosingStep', 0, () => {
+      const plan = LocalFallbackPlanHelper.create('完成课程报告', 120, '周五 18:00', 25, 5);
+      expect(plan.steps.length).assertEqual(3);
+      expect(plan.steps[0].estimatedPomodoros + plan.steps[1].estimatedPomodoros +
+        plan.steps[2].estimatedPomodoros).assertEqual(4);
+      expect(plan.steps[2].title.indexOf('交付') >= 0).assertTrue();
     });
   });
 }
