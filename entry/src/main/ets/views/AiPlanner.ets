@@ -44,6 +44,9 @@ export struct AiPlanner {
   @State deadline: string = '';
   @State availableMinutes: number = 120;
   @State isLoading: boolean = false;
+  @State isCheckingService: boolean = false;
+  @State serviceCheckMessage: string = '';
+  @State serviceCheckSuccess: boolean = false;
   @State showServiceSettings: boolean = false;
   @State summary: string = '';
   @State planSteps: AiPlanStep[] = [];
@@ -333,6 +336,21 @@ export struct AiPlanner {
     this.errorMessage = '';
     this.successMessage = '代理地址已保存';
     this.showServiceSettings = false;
+  }
+
+  private async checkDeepSeekService(): Promise<void> {
+    if (this.isCheckingService) {
+      return;
+    }
+    this.isCheckingService = true;
+    this.serviceCheckMessage = '';
+    try {
+      const result = await AiPlannerService.checkDeepSeekService(this.apiKey, this.deepSeekModel);
+      this.serviceCheckSuccess = result.success;
+      this.serviceCheckMessage = result.message;
+    } finally {
+      this.isCheckingService = false;
+    }
   }
 
   private async buildFocusContext(): Promise<AiFocusContext> {
@@ -1018,7 +1036,10 @@ export struct AiPlanner {
             .type(InputType.Password).width('100%').height(42).fontSize(13)
             .fontColor($r('app.color.text_primary')).placeholderColor($r('app.color.text_tertiary'))
             .backgroundColor($r('app.color.ring_track')).borderRadius(12)
-            .onChange((value: string) => this.apiKey = value)
+            .onChange((value: string) => {
+              this.apiKey = value;
+              this.serviceCheckMessage = '';
+            })
           Row({ space: 8 }) {
             Text('V4 Flash · 日常').layoutWeight(1).height(34).fontSize(11)
               .fontColor(this.deepSeekModel === 'deepseek-v4-flash' ? Color.Black :
@@ -1026,15 +1047,32 @@ export struct AiPlanner {
               .textAlign(TextAlign.Center)
               .backgroundColor(this.deepSeekModel === 'deepseek-v4-flash' ?
                 $r('app.color.primary_green') : $r('app.color.ring_track'))
-              .borderRadius(17).onClick(() => this.deepSeekModel = 'deepseek-v4-flash')
+              .borderRadius(17).onClick(() => {
+                this.deepSeekModel = 'deepseek-v4-flash';
+                this.serviceCheckMessage = '';
+              })
             Text('V4 Pro · 复杂规划').layoutWeight(1).height(34).fontSize(11)
               .fontColor(this.deepSeekModel === 'deepseek-v4-pro' ? Color.Black :
                 $r('app.color.text_secondary'))
               .textAlign(TextAlign.Center)
               .backgroundColor(this.deepSeekModel === 'deepseek-v4-pro' ?
                 $r('app.color.primary_green') : $r('app.color.ring_track'))
-              .borderRadius(17).onClick(() => this.deepSeekModel = 'deepseek-v4-pro')
+              .borderRadius(17).onClick(() => {
+                this.deepSeekModel = 'deepseek-v4-pro';
+                this.serviceCheckMessage = '';
+              })
           }.width('100%')
+          Button(this.isCheckingService ? '正在诊断…' : '检查密钥、余额与模型')
+            .width('100%').height(38).fontSize(11).enabled(!this.isCheckingService)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
+            .borderRadius(19).onClick(() => this.checkDeepSeekService())
+          if (this.serviceCheckMessage.length > 0) {
+            Text(this.serviceCheckMessage).width('100%').fontSize(10).lineHeight(16)
+              .fontColor(this.serviceCheckSuccess ?
+                $r('app.color.primary_green') : $r('app.color.primary_red'))
+          }
+          Text('诊断仅查询账户余额可用状态与模型列表，不发送目标或对话内容。')
+            .width('100%').fontSize(9).fontColor($r('app.color.text_tertiary'))
           Text('直连密钥可能被调试或逆向获取；退出 App 后需重新输入。')
             .width('100%').fontSize(10).fontColor($r('app.color.primary_red'))
         } else {

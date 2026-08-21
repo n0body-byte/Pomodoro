@@ -17,6 +17,11 @@ export interface AiPlanResult {
   errorMessage: string;
 }
 
+export interface AiServiceCheckResult {
+  success: boolean;
+  message: string;
+}
+
 interface AiPlanRequest {
   goal: string;
   availableMinutes: number;
@@ -89,6 +94,18 @@ interface DeepSeekUsage {
   total_tokens: number;
 }
 
+interface DeepSeekBalanceResponse {
+  is_available?: boolean;
+}
+
+interface DeepSeekModelInfo {
+  id?: string;
+}
+
+interface DeepSeekModelsResponse {
+  data?: DeepSeekModelInfo[];
+}
+
 export class AiPlannerService {
   private static emptyPlan(): AiPlan {
     return { summary: '', steps: [] };
@@ -110,6 +127,83 @@ export class AiPlannerService {
 
   private static failure(message: string): AiPlanResult {
     return { success: false, plan: AiPlannerService.emptyPlan(), errorMessage: message };
+  }
+
+  static evaluateDeepSeekService(balanceAvailable: boolean, modelIds: string[],
+    selectedModel: string): AiServiceCheckResult {
+    if (!balanceAvailable) {
+      return { success: false, message: '密钥有效，但账户余额当前不可用于 API 调用' };
+    }
+    if (modelIds.indexOf(selectedModel) < 0) {
+      return { success: false, message: `连接成功，但当前账号未返回所选模型 ${selectedModel}` };
+    }
+    const modelLabel = selectedModel === 'deepseek-v4-pro' ? 'V4 Pro' : 'V4 Flash';
+    return {
+      success: true,
+      message: `连接成功：密钥有效、余额可用，${modelLabel} 可访问；本次诊断未生成内容`
+    };
+  }
+
+  static async checkDeepSeekService(apiKey: string, selectedModel: string): Promise<AiServiceCheckResult> {
+    const normalizedKey = apiKey.trim();
+    if (normalizedKey.length < 10) {
+      return { success: false, message: '请先填写有效的 DeepSeek API Key' };
+    }
+    const client = http.createHttp();
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${normalizedKey}`
+    };
+    try {
+      const balanceResponse = await client.request('https://api.deepseek.com/user/balance', {
+        method: http.RequestMethod.GET,
+        header: headers,
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: 10000,
+        readTimeout: 20000
+      });
+      if (balanceResponse.responseCode === 401 || balanceResponse.responseCode === 403) {
+        return { success: false, message: 'DeepSeek API Key 无效或没有访问权限' };
+      }
+      if (balanceResponse.responseCode === 429) {
+        return { success: false, message: 'DeepSeek 当前请求过于频繁，请稍后再试' };
+      }
+      if (balanceResponse.responseCode < 200 || balanceResponse.responseCode >= 300 ||
+        typeof balanceResponse.result !== 'string') {
+        return { success: false, message: `DeepSeek 余额检查失败（${balanceResponse.responseCode}）` };
+      }
+      const balance = JSON.parse(balanceResponse.result) as DeepSeekBalanceResponse;
+
+      const modelsResponse = await client.request('https://api.deepseek.com/models', {
+        method: http.RequestMethod.GET,
+        header: headers,
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: 10000,
+        readTimeout: 20000
+      });
+      if (modelsResponse.responseCode === 429) {
+        return { success: false, message: 'DeepSeek 当前请求过于频繁，请稍后再试' };
+      }
+      if (modelsResponse.responseCode < 200 || modelsResponse.responseCode >= 300 ||
+        typeof modelsResponse.result !== 'string') {
+        return { success: false, message: `DeepSeek 模型检查失败（${modelsResponse.responseCode}）` };
+      }
+      const models = JSON.parse(modelsResponse.result) as DeepSeekModelsResponse;
+      const modelIds: string[] = [];
+      if (Array.isArray(models.data)) {
+        for (const item of models.data) {
+          if (item !== undefined && typeof item.id === 'string') {
+            modelIds.push(item.id);
+          }
+        }
+      }
+      return AiPlannerService.evaluateDeepSeekService(
+        balance.is_available === true, modelIds, selectedModel);
+    } catch {
+      return { success: false, message: '无法完成 DeepSeek 诊断，请检查网络后重试' };
+    } finally {
+      client.destroy();
+    }
   }
 
   private static isAllowedEndpoint(endpoint: string): boolean {

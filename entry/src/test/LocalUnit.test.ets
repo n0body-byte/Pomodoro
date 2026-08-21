@@ -7,6 +7,7 @@ import { AiAgentDecisionHelper } from '../main/ets/utils/AiAgentDecisionHelper';
 import { AiAgentP1Helper, AiExecutionRecord } from '../main/ets/utils/AiAgentP1Helper';
 import { LocalFallbackPlanHelper } from '../main/ets/utils/LocalFallbackPlanHelper';
 import { AiPlanQualityHelper } from '../main/ets/utils/AiPlanQualityHelper';
+import { AiPlannerService } from '../main/ets/utils/AiPlannerService';
 import {
   AiExecutionInsight,
   AiFocusContext,
@@ -194,6 +195,25 @@ export default function localUnitTest() {
       expect(quality.status).assertEqual('weak');
       expect(quality.improvementPrompt.indexOf('超出可用时间') >= 0).assertTrue();
       expect(quality.improvementPrompt.indexOf('重复步骤') >= 0).assertTrue();
+    });
+
+    it('deepSeekDiagnosticAcceptsAvailableModel', 0, () => {
+      const result = AiPlannerService.evaluateDeepSeekService(
+        true, ['deepseek-v4-flash', 'deepseek-v4-pro'], 'deepseek-v4-flash');
+      expect(result.success).assertTrue();
+      expect(result.message.indexOf('余额可用') >= 0).assertTrue();
+      expect(result.message.indexOf('V4 Flash') >= 0).assertTrue();
+    });
+
+    it('deepSeekDiagnosticSeparatesBalanceAndModelIssues', 0, () => {
+      const balanceResult = AiPlannerService.evaluateDeepSeekService(
+        false, ['deepseek-v4-flash'], 'deepseek-v4-flash');
+      const modelResult = AiPlannerService.evaluateDeepSeekService(
+        true, ['deepseek-v4-flash'], 'deepseek-v4-pro');
+      expect(balanceResult.success).assertFalse();
+      expect(balanceResult.message.indexOf('余额') >= 0).assertTrue();
+      expect(modelResult.success).assertFalse();
+      expect(modelResult.message.indexOf('所选模型') >= 0).assertTrue();
     });
 
     it('agentDecisionRecoversFailedActionFirst', 0, () => {
