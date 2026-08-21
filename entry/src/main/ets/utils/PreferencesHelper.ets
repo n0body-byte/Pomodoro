@@ -64,6 +64,8 @@ export interface TaskContext {
   tag: string;
   note: string;
   estimatedPomodoros: number;
+  trackingStartedAt?: number;
+  source?: 'manual' | 'ai';
 }
 
 export interface TimerState {
@@ -221,14 +223,22 @@ export class PreferencesHelper {
     await prefs.flush();
   }
 
-  static async getTaskCompletedSessions(context: Context, task: string, project: string): Promise<number> {
+  static countCompletedTaskSessions(history: SessionRecord[], task: string,
+    project: string, trackingStartedAt: number = 0): number {
     if (task.length === 0) {
       return 0;
     }
-    const history = await PreferencesHelper.loadSessionHistory(context);
+    const normalizedStart = Math.max(0, trackingStartedAt);
     return history.filter((record: SessionRecord) =>
       PreferencesHelper.isCompletedWorkRecord(record) &&
+      record.completedAt >= normalizedStart &&
       (record.task || '') === task && (record.project || '') === project).length;
+  }
+
+  static async getTaskCompletedSessions(context: Context, task: string,
+    project: string, trackingStartedAt: number = 0): Promise<number> {
+    const history = await PreferencesHelper.loadSessionHistory(context);
+    return PreferencesHelper.countCompletedTaskSessions(history, task, project, trackingStartedAt);
   }
 
   static async clearTodaySessions(context: Context): Promise<void> {
@@ -582,7 +592,10 @@ export class PreferencesHelper {
   }
 
   static async loadTaskContext(context: Context): Promise<TaskContext> {
-    const defaultValue: TaskContext = { task: '', project: '', tag: '', note: '', estimatedPomodoros: 1 };
+    const defaultValue: TaskContext = {
+      task: '', project: '', tag: '', note: '', estimatedPomodoros: 1,
+      trackingStartedAt: 0, source: 'manual'
+    };
     try {
       const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
       const raw = await prefs.get(PREF_KEY_TASK_CONTEXT, '');

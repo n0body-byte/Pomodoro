@@ -75,6 +75,21 @@ export default function localUnitTest() {
       expect(PreferencesHelper.isCompletedWorkRecord(skippedRecord)).assertFalse();
     });
 
+    it('taskProgressStartsWhenPlanStepIsApplied', 0, () => {
+      const history: SessionRecord[] = [
+        { date: '2026-08-21', workSeconds: 1500, completedAt: 100, type: 'work',
+          status: 'completed', task: '完成报告', project: '课程' },
+        { date: '2026-08-21', workSeconds: 1500, completedAt: 300, type: 'work',
+          status: 'completed', task: '完成报告', project: '课程' },
+        { date: '2026-08-21', workSeconds: 600, completedAt: 400, type: 'work',
+          status: 'abandoned', task: '完成报告', project: '课程' }
+      ];
+      expect(PreferencesHelper.countCompletedTaskSessions(
+        history, '完成报告', '课程', 200)).assertEqual(1);
+      expect(PreferencesHelper.countCompletedTaskSessions(
+        history, '完成报告', '课程')).assertEqual(2);
+    });
+
     it('longBreakCadence', 0, () => {
       expect(TimerPlanHelper.isLongBreak(0, 4)).assertFalse();
       expect(TimerPlanHelper.isLongBreak(3, 4)).assertFalse();

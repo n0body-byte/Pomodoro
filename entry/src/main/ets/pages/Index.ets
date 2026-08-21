@@ -51,6 +51,7 @@ struct Index {
   @State currentNote: string = '';
   @State estimatedPomodoros: number = 1;
   @State currentTaskCompleted: number = 0;
+  @State currentTaskSource: string = 'manual';
   @State showTaskEditor: boolean = false;
   @State showEndEarlyDialog: boolean = false;
   @State taskDraft: string = '';
@@ -69,6 +70,7 @@ struct Index {
   private autoStartTimerId: number | null = null;
   private ambientPreviewTimerId: number | null = null;
   private isCompleting: boolean = false;
+  private taskTrackingStartedAt: number = 0;
   private tabsController: TabsController = new TabsController();
 
   async aboutToAppear(): Promise<void> {
@@ -128,11 +130,20 @@ struct Index {
     this.currentTag = taskContext.tag;
     this.currentNote = taskContext.note;
     this.estimatedPomodoros = Math.max(1, taskContext.estimatedPomodoros || 1);
+    this.taskTrackingStartedAt = typeof taskContext.trackingStartedAt === 'number' ?
+      Math.max(0, taskContext.trackingStartedAt) : 0;
+    this.currentTaskSource = taskContext.source === 'ai' ? 'ai' : 'manual';
   }
 
   private async saveTaskContext(): Promise<void> {
-    this.currentTask = this.taskDraft.trim();
-    this.currentProject = this.projectDraft.trim();
+    const nextTask = this.taskDraft.trim();
+    const nextProject = this.projectDraft.trim();
+    if (nextTask !== this.currentTask || nextProject !== this.currentProject) {
+      this.taskTrackingStartedAt = Date.now();
+      this.currentTaskSource = 'manual';
+    }
+    this.currentTask = nextTask;
+    this.currentProject = nextProject;
     this.currentTag = this.tagDraft.trim();
     this.currentNote = this.noteDraft.trim();
     this.estimatedPomodoros = this.estimateDraft;
@@ -141,7 +152,9 @@ struct Index {
       project: this.currentProject.trim(),
       tag: this.currentTag.trim(),
       note: this.currentNote.trim(),
-      estimatedPomodoros: this.estimatedPomodoros
+      estimatedPomodoros: this.estimatedPomodoros,
+      trackingStartedAt: this.taskTrackingStartedAt,
+      source: this.currentTaskSource === 'ai' ? 'ai' : 'manual'
     });
     this.currentTask = this.currentTask.trim();
     this.currentProject = this.currentProject.trim();
@@ -165,6 +178,8 @@ struct Index {
     this.currentNote = '';
     this.estimatedPomodoros = 1;
     this.currentTaskCompleted = 0;
+    this.currentTaskSource = 'manual';
+    this.taskTrackingStartedAt = 0;
     this.taskDraft = '';
     this.projectDraft = '';
     this.tagDraft = '';
@@ -175,7 +190,9 @@ struct Index {
       project: '',
       tag: '',
       note: '',
-      estimatedPomodoros: 1
+      estimatedPomodoros: 1,
+      trackingStartedAt: 0,
+      source: 'manual'
     });
     this.showTaskEditor = false;
   }
@@ -189,15 +206,18 @@ struct Index {
     this.currentTag = step.tag;
     this.currentNote = step.note;
     this.estimatedPomodoros = step.estimatedPomodoros;
+    this.taskTrackingStartedAt = Date.now();
+    this.currentTaskSource = 'ai';
     await PreferencesHelper.saveTaskContext(this.getContext(), {
       task: this.currentTask,
       project: this.currentProject,
       tag: this.currentTag,
       note: this.currentNote,
-      estimatedPomodoros: this.estimatedPomodoros
+      estimatedPomodoros: this.estimatedPomodoros,
+      trackingStartedAt: this.taskTrackingStartedAt,
+      source: 'ai'
     });
-    this.currentTaskCompleted = await PreferencesHelper.getTaskCompletedSessions(
-      this.getContext(), this.currentTask, this.currentProject);
+    this.currentTaskCompleted = 0;
     this.currentTabIndex = 0;
     this.tabsController.changeIndex(0);
   }
@@ -263,7 +283,7 @@ struct Index {
       this.todayWorkSeconds = await PreferencesHelper.getTodayWorkSeconds(this.getContext());
       this.todayBreakSeconds = await PreferencesHelper.getTodayBreakSeconds(this.getContext());
       this.currentTaskCompleted = await PreferencesHelper.getTaskCompletedSessions(
-        this.getContext(), this.currentTask, this.currentProject);
+        this.getContext(), this.currentTask, this.currentProject, this.taskTrackingStartedAt);
     } catch {
       this.todayCount = 0;
       this.todayWorkSeconds = 0;
@@ -944,7 +964,7 @@ struct Index {
             .fontColor(this.currentTask.length > 0 ? $r('app.color.text_primary') : $r('app.color.primary_red'))
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.currentTask.length > 0) {
-            Text(`${this.currentProject.length > 0 ? this.currentProject : '无项目'}${this.currentTag.length > 0 ? ` · #${this.currentTag}` : ''} · ${this.currentTaskCompleted}/${this.estimatedPomodoros}`)
+            Text(`${this.currentProject.length > 0 ? this.currentProject : '无项目'}${this.currentTag.length > 0 ? ` · #${this.currentTag}` : ''} · ${this.currentTaskCompleted}/${this.estimatedPomodoros}${this.currentTaskSource === 'ai' ? ' · AI 计划' : ''}`)
               .fontSize(10).fontColor($r('app.color.text_tertiary'))
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
