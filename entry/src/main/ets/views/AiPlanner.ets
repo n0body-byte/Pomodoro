@@ -4,6 +4,7 @@ import { AiPlanInsightHelper } from '../utils/AiPlanInsightHelper';
 import { AiAgentDecisionHelper } from '../utils/AiAgentDecisionHelper';
 import { AiAgentP1Helper, AiExecutionRecord } from '../utils/AiAgentP1Helper';
 import { LocalFallbackPlanHelper } from '../utils/LocalFallbackPlanHelper';
+import { AiPlanQualityHelper } from '../utils/AiPlanQualityHelper';
 import {
   AiAgentDecision,
   AiAgentMemory,
@@ -16,6 +17,7 @@ import {
   AiGoalDriftInsight,
   AiPlan,
   AiPlanInsight,
+  AiPlanQualityInsight,
   AiPlanStep
 } from '../utils/AiAgentModels';
 
@@ -455,6 +457,10 @@ export struct AiPlanner {
       tracksCurrentPlan ? this.currentTaskCompleted : 0);
   }
 
+  private getPlanQuality(insight: AiPlanInsight): AiPlanQualityInsight {
+    return AiPlanQualityHelper.evaluate(this.planSteps, insight);
+  }
+
   private getTrackedStepPomodoros(step: AiPlanStep): number {
     if (step.completed) {
       return Math.max(1, step.estimatedPomodoros);
@@ -514,6 +520,18 @@ export struct AiPlanner {
       `${insight.requiredMinutes} 分钟，但我现在只有 ${this.availableMinutes} 分钟。` +
       `请保留最有价值的可交付成果，压缩或合并后续步骤，并保留合理缓冲。`;
     await this.askAgent(message);
+  }
+
+  private async requestPlanQualityImprovement(quality: AiPlanQualityInsight): Promise<void> {
+    if (quality.improvementPrompt.length === 0) {
+      return;
+    }
+    if (this.serviceMode !== 'deepseek') {
+      this.followUp = quality.improvementPrompt;
+      this.successMessage = '质检建议已填入调整框；多轮修正请切换到 DeepSeek 直连';
+      return;
+    }
+    await this.askAgent(quality.improvementPrompt);
   }
 
   private async alignWithPrimaryGoal(): Promise<void> {
@@ -1165,7 +1183,7 @@ export struct AiPlanner {
   }
 
   @Builder
-  private planInsightCard(insight: AiPlanInsight) {
+  private planInsightCard(insight: AiPlanInsight, quality: AiPlanQualityInsight) {
     Column({ space: 11 }) {
       Row() {
         Column({ space: 3 }) {
@@ -1200,6 +1218,24 @@ export struct AiPlanner {
       }.width('100%')
       Text(insight.description).fontSize(11).lineHeight(17)
         .fontColor($r('app.color.text_secondary')).width('100%')
+      Column({ space: 6 }) {
+        Row() {
+          Text('本地计划质检').fontSize(11).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).layoutWeight(1)
+          Text(`${quality.score} 分`).fontSize(10).fontWeight(FontWeight.Bold)
+            .fontColor(quality.status === 'strong' ?
+              $r('app.color.primary_green') : $r('app.color.primary_red'))
+        }.width('100%')
+        Text(quality.description).fontSize(10).lineHeight(16)
+          .fontColor($r('app.color.text_secondary')).width('100%')
+        if (quality.status !== 'strong' && quality.status !== 'empty' && insight.status !== 'completed') {
+          Button(this.serviceMode === 'deepseek' ? '让 AI 按质检结果修正' : '使用质检修正建议')
+            .width('100%').height(34).fontSize(10).enabled(!this.isLoading)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_red'))
+            .borderRadius(17).onClick(() => this.requestPlanQualityImprovement(quality))
+        }
+      }
+      .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(12)
       if (insight.status !== 'completed') {
         Row({ space: 8 }) {
           Button(this.canApplyStep ? '执行下一步' : '计时结束后执行')
@@ -1408,7 +1444,7 @@ export struct AiPlanner {
                   .fontColor($r('app.color.text_secondary')).padding(14)
                   .backgroundColor($r('app.color.surface')).borderRadius(16)
               }
-              this.planInsightCard(this.getPlanInsight())
+              this.planInsightCard(this.getPlanInsight(), this.getPlanQuality(this.getPlanInsight()))
               ForEach(this.planSteps, (step: AiPlanStep, index: number) => {
                 this.planCard(step, index)
               }, (step: AiPlanStep, index: number) => `${index}-${step.title}`)

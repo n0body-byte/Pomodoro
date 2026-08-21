@@ -84,6 +84,14 @@ export interface AiPlanInsight {
   nextStepIndex: number;
 }
 
+export interface AiPlanQualityInsight {
+  score: number;
+  status: string;
+  title: string;
+  description: string;
+  improvementPrompt: string;
+}
+
 export interface AiAgentMemory {
   primaryGoal: string;
   longTermSummary: string;

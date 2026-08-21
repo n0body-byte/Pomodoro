@@ -6,6 +6,7 @@ import { AiPlanInsightHelper } from '../main/ets/utils/AiPlanInsightHelper';
 import { AiAgentDecisionHelper } from '../main/ets/utils/AiAgentDecisionHelper';
 import { AiAgentP1Helper, AiExecutionRecord } from '../main/ets/utils/AiAgentP1Helper';
 import { LocalFallbackPlanHelper } from '../main/ets/utils/LocalFallbackPlanHelper';
+import { AiPlanQualityHelper } from '../main/ets/utils/AiPlanQualityHelper';
 import {
   AiExecutionInsight,
   AiFocusContext,
@@ -165,6 +166,34 @@ export default function localUnitTest() {
       expect(insight.progressPercent).assertEqual(50);
       expect(insight.requiredMinutes).assertEqual(55);
       expect(insight.nextStepIndex).assertEqual(0);
+    });
+
+    it('planQualityAcceptsExecutableDeliverablePlan', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '完成报告主体', project: '报告', tag: '', note: '写完三个核心章节', estimatedPomodoros: 2,
+          reason: '优先形成主体成果', completed: false },
+        { title: '检查并提交', project: '报告', tag: '', note: '检查格式并完成提交', estimatedPomodoros: 1,
+          reason: '确保形成可验证交付', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 120, 25, 5);
+      const quality = AiPlanQualityHelper.evaluate(steps, insight);
+      expect(quality.score).assertEqual(100);
+      expect(quality.status).assertEqual('strong');
+    });
+
+    it('planQualityFindsCapacityAndStructureRisks', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '处理事情', project: '项目', tag: '', note: '', estimatedPomodoros: 3,
+          reason: '', completed: false },
+        { title: '处理事情', project: '项目', tag: '', note: '', estimatedPomodoros: 3,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(steps, 60, 25, 5);
+      const quality = AiPlanQualityHelper.evaluate(steps, insight);
+      expect(quality.score < 65).assertTrue();
+      expect(quality.status).assertEqual('weak');
+      expect(quality.improvementPrompt.indexOf('超出可用时间') >= 0).assertTrue();
+      expect(quality.improvementPrompt.indexOf('重复步骤') >= 0).assertTrue();
     });
 
     it('agentDecisionRecoversFailedActionFirst', 0, () => {
