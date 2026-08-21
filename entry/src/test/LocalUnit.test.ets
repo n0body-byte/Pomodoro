@@ -11,7 +11,10 @@ import { AiGoalReadinessHelper } from '../main/ets/utils/AiGoalReadinessHelper';
 import { AiPlanProgressHelper } from '../main/ets/utils/AiPlanProgressHelper';
 import { AiPlanVersionHelper } from '../main/ets/utils/AiPlanVersionHelper';
 import { AiPlannerService } from '../main/ets/utils/AiPlannerService';
+import { CrossDeviceContinuationHelper } from '../main/ets/utils/CrossDeviceContinuationHelper';
 import {
+  AiAgentState,
+  AiChatMessage,
   AiExecutionInsight,
   AiFocusContext,
   AiGoalDriftInsight,
@@ -508,6 +511,70 @@ export default function localUnitTest() {
       expect(AiPlanVersionHelper.capture(empty, plan, 'none', 1) === undefined).assertTrue();
       expect(AiPlanVersionHelper.capture(plan, AiPlanVersionHelper.copyPlan(plan), 'ai', 2) ===
         undefined).assertTrue();
+    });
+
+    it('continuationKeepsAbsoluteTimerAndRecentAgentContext', 0, () => {
+      const messages: AiChatMessage[] = [];
+      for (let index = 0; index < 10; index++) {
+        messages.push({ role: index % 2 === 0 ? 'user' : 'assistant',
+          content: `消息${index}`, createdAt: 100 + index });
+      }
+      const agentState: AiAgentState = {
+        id: 'conversation-1', title: '复赛计划', createdAt: 100, messages: messages,
+        plan: { summary: '先完成演示', steps: [
+          { title: '完成演示脚本', project: '复赛', tag: '演示', note: '写完五分钟演示脚本',
+            estimatedPomodoros: 2, reason: '先形成可检查成果', completed: false }
+        ] },
+        updatedAt: 200, needsReview: false, lastCompletedStepTitle: ''
+      };
+      const snapshot = CrossDeviceContinuationHelper.createSnapshot({
+        remainingSeconds: 1200, totalSeconds: 1500, isWorkMode: true, isRunning: true,
+        completedSessions: 2, savedAt: 1000, deadlineAt: 130000, isLongBreak: false
+      }, {
+        task: '完成演示脚本', project: '复赛', tag: '演示', note: '写完初稿',
+        estimatedPomodoros: 2, trackingStartedAt: 900, source: 'ai',
+        agentConversationId: 'conversation-1'
+      }, agentState, [], 2000);
+      const parsed = CrossDeviceContinuationHelper.parse(
+        CrossDeviceContinuationHelper.serialize(snapshot));
+      expect(parsed.success).assertTrue();
+      expect(parsed.snapshot !== undefined).assertTrue();
+      if (parsed.snapshot !== undefined && parsed.snapshot.timerState !== null) {
+        expect(parsed.snapshot.timerState.deadlineAt).assertEqual(130000);
+        expect(parsed.snapshot.agentState.messages.length).assertEqual(8);
+        expect(parsed.snapshot.agentState.messages[0].content).assertEqual('消息2');
+      }
+    });
+
+    it('continuationRejectsUnsupportedOrBrokenPayload', 0, () => {
+      expect(CrossDeviceContinuationHelper.parse('{broken').success).assertFalse();
+      const agentState: AiAgentState = {
+        id: '', title: '', createdAt: 0, messages: [], plan: { summary: '', steps: [] },
+        updatedAt: 0, needsReview: false, lastCompletedStepTitle: ''
+      };
+      const snapshot = CrossDeviceContinuationHelper.createSnapshot(null, {
+        task: '', project: '', tag: '', note: '', estimatedPomodoros: 1
+      }, agentState, [], 1000);
+      const unsupported = CrossDeviceContinuationHelper.serialize(snapshot)
+        .replace('"schemaVersion":1', '"schemaVersion":2');
+      expect(CrossDeviceContinuationHelper.parse(unsupported).success).assertFalse();
+    });
+
+    it('continuationHistoryMergeIsIdempotent', 0, () => {
+      const existing: SessionRecord[] = [
+        { id: 'record-1', date: '2026-08-21', workSeconds: 1500, completedAt: 100,
+          type: 'work', status: 'completed' }
+      ];
+      const incoming: SessionRecord[] = [
+        { id: 'record-1', date: '2026-08-21', workSeconds: 1500, completedAt: 100,
+          type: 'work', status: 'completed' },
+        { id: 'record-2', date: '2026-08-21', workSeconds: 300, completedAt: 200,
+          type: 'break', status: 'completed' }
+      ];
+      const merged = PreferencesHelper.mergeSessionRecords(existing, incoming);
+      expect(merged.length).assertEqual(2);
+      expect(merged[0].id).assertEqual('record-1');
+      expect(merged[1].id).assertEqual('record-2');
     });
   });
 }

@@ -24,6 +24,8 @@ const MAX_RECOVERED_PHASES = 32;
 @Entry
 @Component
 struct Index {
+  @StorageLink('pomodoroContinuationRevision') @Watch('onContinuationRevision')
+  continuationRevision: number = 0;
   @State remainingSeconds: number = DEFAULT_WORK_SECONDS;
   @State totalSeconds: number = DEFAULT_WORK_SECONDS;
   @State isRunning: boolean = false;
@@ -77,6 +79,7 @@ struct Index {
   private taskTrackingStartedAt: number = 0;
   private nextAiPlanStep: AiPlanStep | undefined = undefined;
   private nextAiConversationId: string = '';
+  private isRestoringContinuation: boolean = false;
   private tabsController: TabsController = new TabsController();
 
   async aboutToAppear(): Promise<void> {
@@ -117,6 +120,22 @@ struct Index {
 
   async onPageHide(): Promise<void> {
     await this.saveCurrentState();
+  }
+
+  private async onContinuationRevision(): Promise<void> {
+    if (this.continuationRevision <= 0 || this.isRestoringContinuation) {
+      return;
+    }
+    this.isRestoringContinuation = true;
+    try {
+      const taskContext = await PreferencesHelper.loadTaskContext(this.getContext());
+      this.applyTaskContext(taskContext);
+      await this.loadSettings();
+      await this.loadTodayStats();
+      await this.recoverFromBackground();
+    } finally {
+      this.isRestoringContinuation = false;
+    }
   }
 
   private applyColorMode(): void {

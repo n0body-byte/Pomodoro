@@ -27,6 +27,8 @@ import {
 
 @Component
 export struct AiPlanner {
+  @StorageLink('pomodoroContinuationRevision') @Watch('onContinuationRevision')
+  continuationRevision: number = 0;
   @Prop @Watch('onActiveChange') active: boolean = false;
   @Prop workMinutes: number = 25;
   @Prop breakMinutes: number = 5;
@@ -89,6 +91,7 @@ export struct AiPlanner {
     '三天内完成产品需求文档初稿',
     '用两个小时整理本周工作并规划下周'
   ];
+  private isRestoringContinuation: boolean = false;
 
   async aboutToAppear(): Promise<void> {
     this.endpoint = await PreferencesHelper.loadAiServiceEndpoint(this.getContext());
@@ -106,6 +109,20 @@ export struct AiPlanner {
       await this.loadConversationHistory();
       await this.refreshAgentAnalysis();
       await this.tryAutoReview();
+    }
+  }
+
+  private async onContinuationRevision(): Promise<void> {
+    if (this.continuationRevision <= 0 || this.isRestoringContinuation) {
+      return;
+    }
+    this.isRestoringContinuation = true;
+    try {
+      await this.loadAgentState();
+      await this.loadConversationHistory();
+      await this.refreshAgentAnalysis();
+    } finally {
+      this.isRestoringContinuation = false;
     }
   }
 

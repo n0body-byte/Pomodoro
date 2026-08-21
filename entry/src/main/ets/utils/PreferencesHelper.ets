@@ -24,6 +24,7 @@ import {
   PREF_KEY_AI_CONVERSATION_INDEX,
   PREF_KEY_AI_CONVERSATION_PREFIX,
   PREF_KEY_AI_AUTO_REVIEW,
+  PREF_KEY_CONTINUATION_TRANSFER_ID,
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET,
@@ -189,6 +190,54 @@ export class PreferencesHelper {
     } catch {
       return [];
     }
+  }
+
+  static mergeSessionRecords(existing: SessionRecord[], incoming: SessionRecord[]): SessionRecord[] {
+    const merged: SessionRecord[] = [];
+    for (const record of existing) {
+      merged.push(record);
+    }
+    for (const record of incoming) {
+      const incomingKey = PreferencesHelper.getRecordKey(record);
+      let duplicate = false;
+      for (const current of merged) {
+        if (PreferencesHelper.getRecordKey(current) === incomingKey) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (!duplicate) {
+        merged.push(record);
+      }
+    }
+    merged.sort((left: SessionRecord, right: SessionRecord) => left.completedAt - right.completedAt);
+    return merged;
+  }
+
+  static async mergeSessionHistory(context: Context, incoming: SessionRecord[]): Promise<void> {
+    if (incoming.length === 0) {
+      return;
+    }
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    const existing = await PreferencesHelper.loadSessionHistory(context);
+    const merged = PreferencesHelper.mergeSessionRecords(existing, incoming);
+    await prefs.put(PREF_KEY_SESSION_HISTORY, JSON.stringify(merged));
+    await prefs.flush();
+  }
+
+  static async loadContinuationTransferId(context: Context): Promise<string> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_CONTINUATION_TRANSFER_ID, '') as string;
+    } catch {
+      return '';
+    }
+  }
+
+  static async saveContinuationTransferId(context: Context, transferId: string): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_CONTINUATION_TRANSFER_ID, transferId);
+    await prefs.flush();
   }
 
   static async updateSessionRecord(context: Context, record: SessionRecord): Promise<void> {
@@ -398,6 +447,12 @@ export class PreferencesHelper {
   static async saveTimerState(context: Context, state: TimerState): Promise<void> {
     const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
     await prefs.put(PREF_KEY_TIMER_STATE, JSON.stringify(state));
+    await prefs.flush();
+  }
+
+  static async clearTimerState(context: Context): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.delete(PREF_KEY_TIMER_STATE);
     await prefs.flush();
   }
 

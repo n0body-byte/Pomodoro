@@ -28,6 +28,7 @@ export const PREF_KEY_AI_AGENT_STATE = 'aiAgentState';
 export const PREF_KEY_AI_CONVERSATION_INDEX = 'aiConversationIndex';
 export const PREF_KEY_AI_CONVERSATION_PREFIX = 'aiConversation_';
 export const PREF_KEY_AI_AUTO_REVIEW = 'aiAutoReview';
+export const PREF_KEY_CONTINUATION_TRANSFER_ID = 'continuationTransferId';
 
 export const DEFAULT_LONG_BREAK_SECONDS = 15 * 60;
 export const DEFAULT_LONG_BREAK_INTERVAL = 4;
