@@ -1862,62 +1862,84 @@ export struct AiPlanner {
     .borderRadius(16)
   }
 
+  @Builder
+  private plannerControlPane() {
+    Column({ space: 12 }) {
+      this.serviceCard()
+      this.requestTraceCard()
+      this.contextCard()
+      this.agentMemoryCard()
+      if (this.needsReview && this.lastCompletedStepTitle.length > 0) {
+        this.executionCheckInCard()
+      }
+      if (this.shouldShowAgentSuggestion(this.getAgentDecision()) &&
+        (!this.needsReview || this.hasCurrentExecutionCheckIn())) {
+        this.agentActionCard(this.getAgentDecision())
+      }
+      this.inputCard()
+    }.width('100%')
+  }
+
+  @Builder
+  private plannerResultPane() {
+    Column({ space: 12 }) {
+      if (this.errorMessage.length > 0) {
+        Text(this.errorMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_red'))
+          .padding(12).backgroundColor('#24FA2E69').borderRadius(12)
+      }
+      if (this.successMessage.length > 0) {
+        Text(this.successMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_green'))
+          .padding(12).backgroundColor('#2065FE08').borderRadius(12)
+      }
+      this.conversationCard()
+      if (this.planSteps.length > 0) {
+        Row() {
+          Text('执行计划').fontSize(16).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+          Blank()
+          if (this.planSource !== 'none') {
+            Text(this.planSource === 'local' ? '本地应急' : '联网智能体')
+              .fontSize(9).fontWeight(FontWeight.Bold)
+              .fontColor(this.planSource === 'local' ?
+                $r('app.color.primary_red') : $r('app.color.primary_green'))
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .backgroundColor($r('app.color.ring_track')).borderRadius(10)
+              .margin({ right: 8 })
+          }
+          Text(`${this.getCompletedStepCount()}/${this.planSteps.length}`)
+            .fontSize(12).fontColor($r('app.color.primary_green'))
+        }.width('100%').padding({ left: 4, right: 4 })
+        if (this.summary.length > 0) {
+          Text(this.summary).width('100%').fontSize(12).lineHeight(19)
+            .fontColor($r('app.color.text_secondary')).padding(14)
+            .backgroundColor($r('app.color.surface')).borderRadius(16)
+        }
+        this.planVersionCard()
+        this.planInsightCard(this.getPlanInsight(), this.getPlanQuality(this.getPlanInsight()))
+        ForEach(this.planSteps, (step: AiPlanStep, index: number) => {
+          this.planCard(step, index)
+        }, (step: AiPlanStep, index: number) => `${index}-${step.title}`)
+      }
+      this.followUpCard()
+    }.width('100%')
+  }
+
   build() {
     Stack({ alignContent: Alignment.Top }) {
       Column({ space: 12 }) {
         this.pageHeader()
         Scroll() {
-          Column({ space: 12 }) {
-            this.serviceCard()
-            this.requestTraceCard()
-            this.contextCard()
-            this.agentMemoryCard()
-            if (this.needsReview && this.lastCompletedStepTitle.length > 0) {
-              this.executionCheckInCard()
+          GridRow({
+            columns: { xs: 4, sm: 12 },
+            gutter: { x: 12, y: 12 },
+            breakpoints: { value: ['720vp'], reference: BreakpointsReference.WindowSize }
+          }) {
+            GridCol({ span: { xs: 4, sm: 5 } }) {
+              this.plannerControlPane()
             }
-            if (this.shouldShowAgentSuggestion(this.getAgentDecision()) &&
-              (!this.needsReview || this.hasCurrentExecutionCheckIn())) {
-              this.agentActionCard(this.getAgentDecision())
+            GridCol({ span: { xs: 4, sm: 7 } }) {
+              this.plannerResultPane()
             }
-            this.inputCard()
-            if (this.errorMessage.length > 0) {
-              Text(this.errorMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_red'))
-                .padding(12).backgroundColor('#24FA2E69').borderRadius(12)
-            }
-            if (this.successMessage.length > 0) {
-              Text(this.successMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_green'))
-                .padding(12).backgroundColor('#2065FE08').borderRadius(12)
-            }
-            this.conversationCard()
-            if (this.planSteps.length > 0) {
-              Row() {
-                Text('执行计划').fontSize(16).fontWeight(FontWeight.Bold)
-                  .fontColor($r('app.color.text_primary'))
-                Blank()
-                if (this.planSource !== 'none') {
-                  Text(this.planSource === 'local' ? '本地应急' : '联网智能体')
-                    .fontSize(9).fontWeight(FontWeight.Bold)
-                    .fontColor(this.planSource === 'local' ?
-                      $r('app.color.primary_red') : $r('app.color.primary_green'))
-                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-                    .backgroundColor($r('app.color.ring_track')).borderRadius(10)
-                    .margin({ right: 8 })
-                }
-                Text(`${this.getCompletedStepCount()}/${this.planSteps.length}`)
-                  .fontSize(12).fontColor($r('app.color.primary_green'))
-              }.width('100%').padding({ left: 4, right: 4 })
-              if (this.summary.length > 0) {
-                Text(this.summary).width('100%').fontSize(12).lineHeight(19)
-                  .fontColor($r('app.color.text_secondary')).padding(14)
-                  .backgroundColor($r('app.color.surface')).borderRadius(16)
-              }
-              this.planVersionCard()
-              this.planInsightCard(this.getPlanInsight(), this.getPlanQuality(this.getPlanInsight()))
-              ForEach(this.planSteps, (step: AiPlanStep, index: number) => {
-                this.planCard(step, index)
-              }, (step: AiPlanStep, index: number) => `${index}-${step.title}`)
-            }
-            this.followUpCard()
           }.width('100%').padding({ bottom: 20 })
         }.scrollBar(BarState.Off).layoutWeight(1).width('100%')
       }
