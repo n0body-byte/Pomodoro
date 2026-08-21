@@ -59,10 +59,17 @@ export class LocalFallbackPlanHelper {
         '明确完成标准与所需材料', project,
         `写下“${normalizedGoal}”的完成标准，只准备本轮必需的材料。`, 1,
         '先消除启动阻力，避免在准备阶段消耗过多时间。'));
-      steps.push(LocalFallbackPlanHelper.createStep(
-        '完成核心成果', project,
-        `集中完成“${normalizedGoal}”的主体部分，中途暂不处理低优先级细节。`,
-        Math.max(1, pomodoros - 2), '把大部分时间投入最有价值的交付内容。'));
+      let remainingCorePomodoros = Math.max(1, pomodoros - 2);
+      let coreIndex = 1;
+      while (remainingCorePomodoros > 0) {
+        const chunk = Math.min(4, remainingCorePomodoros);
+        steps.push(LocalFallbackPlanHelper.createStep(
+          `完成核心成果第 ${coreIndex} 部分`, project,
+          `集中完成“${normalizedGoal}”的第 ${coreIndex} 部分，并保存本轮可检查的阶段结果。`,
+          chunk, '把主要时间投入最有价值的交付内容，同时控制单步粒度。'));
+        remainingCorePomodoros -= chunk;
+        coreIndex += 1;
+      }
       steps.push(LocalFallbackPlanHelper.createStep(
         '检查、修正并交付', project,
         '按照完成标准检查结果，修正关键问题并保存或提交。', 1,

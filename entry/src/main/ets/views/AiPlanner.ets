@@ -4,6 +4,7 @@ import { AiPlanInsightHelper } from '../utils/AiPlanInsightHelper';
 import { AiAgentDecisionHelper } from '../utils/AiAgentDecisionHelper';
 import { AiAgentP1Helper, AiExecutionRecord } from '../utils/AiAgentP1Helper';
 import { LocalFallbackPlanHelper } from '../utils/LocalFallbackPlanHelper';
+import { AiGoalReadinessHelper } from '../utils/AiGoalReadinessHelper';
 import { AiPlanQualityHelper } from '../utils/AiPlanQualityHelper';
 import { AiPlanVersionHelper } from '../utils/AiPlanVersionHelper';
 import {
@@ -16,6 +17,7 @@ import {
   AiExecutionInsight,
   AiFocusContext,
   AiGoalDriftInsight,
+  AiGoalReadinessInsight,
   AiPlan,
   AiPlanInsight,
   AiPlanQualityInsight,
@@ -553,6 +555,30 @@ export struct AiPlanner {
     return AiPlanQualityHelper.evaluate(this.planSteps, insight);
   }
 
+  private getGoalReadiness(): AiGoalReadinessInsight {
+    return AiGoalReadinessHelper.evaluate(this.goal);
+  }
+
+  private evaluateCandidatePlan(plan: AiPlan): AiPlanQualityInsight {
+    const insight = AiPlanInsightHelper.calculate(
+      plan.steps, this.availableMinutes, this.workMinutes, this.breakMinutes);
+    return AiPlanQualityHelper.evaluate(plan.steps, insight);
+  }
+
+  private buildRepairHistory(userMessage: string, assistantReply: string): AiChatMessage[] {
+    const history: AiChatMessage[] = [];
+    const startIndex = Math.max(0, this.chatMessages.length - 14);
+    for (let index = startIndex; index < this.chatMessages.length; index++) {
+      const item = this.chatMessages[index];
+      if (item !== undefined) {
+        history.push(item);
+      }
+    }
+    history.push({ role: 'user', content: userMessage, createdAt: Date.now() });
+    history.push({ role: 'assistant', content: assistantReply, createdAt: Date.now() });
+    return history;
+  }
+
   private getTrackedStepPomodoros(step: AiPlanStep): number {
     if (step.completed) {
       return Math.max(1, step.estimatedPomodoros);
@@ -767,16 +793,43 @@ export struct AiPlanner {
           this.lastFailedMessage = normalized;
           return false;
         }
-        this.appendMessages(normalized, result.reply);
-        this.capturePreviousPlan(result.plan);
-        this.summary = result.plan.summary;
-        this.planSteps = result.plan.steps;
-        this.planSource = 'ai';
+        let acceptedResult: AiAgentResult = result;
+        let quality = this.evaluateCandidatePlan(result.plan);
+        let repaired = false;
         this.lastTotalTokens = result.usage.totalTokens;
+        if (!quality.canApply) {
+          const repairResult: AiAgentResult = await AiPlannerService.continueDeepSeekAgent(
+            this.apiKey, this.deepSeekModel, quality.improvementPrompt,
+            this.buildRepairHistory(normalized, result.reply), result.plan, focusContext,
+            this.agentMemory, this.goalDriftInsight, this.executionInsight);
+          this.lastTotalTokens += repairResult.usage.totalTokens;
+          if (!repairResult.success) {
+            this.errorMessage = `AI 计划未通过质量门：${quality.description}` +
+              `自动修复失败：${repairResult.errorMessage}`;
+            this.lastFailedMessage = normalized;
+            return false;
+          }
+          quality = this.evaluateCandidatePlan(repairResult.plan);
+          if (!quality.canApply) {
+            this.errorMessage = `AI 计划未通过质量门，已停止自动重试：${quality.description}`;
+            this.lastFailedMessage = normalized;
+            return false;
+          }
+          acceptedResult = repairResult;
+          repaired = true;
+        }
+        this.appendMessages(normalized, acceptedResult.reply);
+        this.capturePreviousPlan(acceptedResult.plan);
+        this.summary = acceptedResult.plan.summary;
+        this.planSteps = acceptedResult.plan.steps;
+        this.planSource = 'ai';
         this.lastFailedMessage = '';
         this.needsReview = false;
         await this.refreshAgentAnalysis();
         await this.saveAgentState(false);
+        if (repaired) {
+          this.successMessage = '首版计划未通过本地质检，智能体已自动修正一次并通过';
+        }
         return true;
       }
 
@@ -789,6 +842,13 @@ export struct AiPlanner {
         this.endpoint, normalized, this.availableMinutes, this.deadline, this.workMinutes, this.breakMinutes);
       if (!result.success) {
         this.errorMessage = result.errorMessage;
+        this.lastFailedMessage = normalized;
+        return false;
+      }
+      const quality = this.evaluateCandidatePlan(result.plan);
+      if (!quality.canApply) {
+        this.errorMessage = `代理返回的计划未通过质量门：${quality.description}` +
+          '请按质检建议修改目标后重新生成。';
         this.lastFailedMessage = normalized;
         return false;
       }
@@ -811,17 +871,22 @@ export struct AiPlanner {
   }
 
   private async generatePlan(): Promise<void> {
-    if (this.goal.trim().length < 4) {
-      this.errorMessage = '请更具体地描述你想完成的目标';
+    const readiness = this.getGoalReadiness();
+    if (!readiness.ready) {
+      this.errorMessage = readiness.question;
       return;
     }
     const deadlineText = this.deadline.trim().length > 0 ? this.deadline.trim() : '未指定';
+    const previousPrimaryGoal = this.primaryGoal;
     this.primaryGoal = this.goal.trim();
     this.goalDriftInsight = AiAgentP1Helper.emptyDrift();
     this.lastExecutionReplanKey = '';
     const message = `请制定或重新规划这个目标：${this.goal.trim()}。` +
       `我可用 ${this.availableMinutes} 分钟，截止时间：${deadlineText}。`;
-    await this.askAgent(message);
+    if (!await this.askAgent(message)) {
+      this.primaryGoal = previousPrimaryGoal;
+      await this.refreshAgentAnalysis();
+    }
   }
 
   private async sendFollowUp(): Promise<void> {
@@ -845,6 +910,11 @@ export struct AiPlanner {
   }
 
   private applyStep(step: AiPlanStep): void {
+    const quality = this.getPlanQuality(this.getPlanInsight());
+    if (!quality.canApply) {
+      this.errorMessage = `当前计划未通过质量门：${quality.description}`;
+      return;
+    }
     if (!this.canApplyStep) {
       this.errorMessage = '请先完成或重置当前一轮计时，再切换任务';
       return;
@@ -1352,8 +1422,9 @@ export struct AiPlanner {
       .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(12)
       if (insight.status !== 'completed') {
         Row({ space: 8 }) {
-          Button(this.canApplyStep ? '执行下一步' : '计时结束后执行')
-            .layoutWeight(1).height(36).fontSize(11).enabled(this.canApplyStep)
+          Button(!quality.canApply ? '先修正计划' :
+            (this.canApplyStep ? '执行下一步' : '计时结束后执行'))
+            .layoutWeight(1).height(36).fontSize(11).enabled(this.canApplyStep && quality.canApply)
             .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(18)
             .onClick(() => this.applyNextStep())
           if (insight.status === 'over_capacity' || insight.status === 'tight') {
@@ -1371,6 +1442,21 @@ export struct AiPlanner {
   }
 
   @Builder
+  private goalReadinessCard(readiness: AiGoalReadinessInsight) {
+    Column({ space: 4 }) {
+      Row({ space: 6 }) {
+        Text(readiness.ready ? '✓' : '!').fontSize(11).fontWeight(FontWeight.Bold)
+          .fontColor(readiness.ready ? $r('app.color.primary_green') : $r('app.color.primary_red'))
+        Text(readiness.title).fontSize(11).fontWeight(FontWeight.Bold)
+          .fontColor(readiness.ready ? $r('app.color.primary_green') : $r('app.color.primary_red'))
+      }.width('100%')
+      Text(readiness.ready ? readiness.description : readiness.question)
+        .fontSize(10).lineHeight(15).fontColor($r('app.color.text_secondary')).width('100%')
+    }
+    .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(12)
+  }
+
+  @Builder
   private inputCard() {
     Column({ space: 12 }) {
       Column({ space: 3 }) {
@@ -1383,6 +1469,9 @@ export struct AiPlanner {
         .width('100%').height(92).fontSize(14).fontColor($r('app.color.text_primary'))
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
         .borderRadius(14).padding(12).onChange((value: string) => this.goal = value)
+      if (this.goal.trim().length > 0) {
+        this.goalReadinessCard(this.getGoalReadiness())
+      }
       Scroll() {
         Row({ space: 8 }) {
           ForEach(this.examples, (example: string) => {
@@ -1409,7 +1498,8 @@ export struct AiPlanner {
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
         .borderRadius(12).onChange((value: string) => this.deadline = value)
       Button(this.isLoading ? '智能体正在分析…' : '生成或重排计划')
-        .width('100%').height(46).fontSize(14).fontWeight(FontWeight.Bold).enabled(!this.isLoading)
+        .width('100%').height(46).fontSize(14).fontWeight(FontWeight.Bold)
+        .enabled(!this.isLoading && this.getGoalReadiness().ready)
         .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(23)
         .onClick(() => this.generatePlan())
     }
@@ -1527,8 +1617,10 @@ export struct AiPlanner {
         Text(step.note).fontSize(12).lineHeight(18).fontColor($r('app.color.text_secondary')).width('100%')
       }
       if (!step.completed) {
-        Button(this.canApplyStep ? '设为当前专注任务' : '当前轮结束后可使用')
-          .width('100%').height(36).fontSize(11).enabled(this.canApplyStep)
+        Button(!this.getPlanQuality(this.getPlanInsight()).canApply ? '计划质检通过后可执行' :
+          (this.canApplyStep ? '设为当前专注任务' : '当前轮结束后可使用'))
+          .width('100%').height(36).fontSize(11)
+          .enabled(this.canApplyStep && this.getPlanQuality(this.getPlanInsight()).canApply)
           .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
           .borderRadius(18).onClick(() => this.applyStep(step))
       }

@@ -10,6 +10,7 @@ import {
   AiPlanStep,
   AiUsage
 } from './AiAgentModels';
+import { AiGoalReadinessHelper } from './AiGoalReadinessHelper';
 
 export interface AiPlanResult {
   success: boolean;
@@ -248,8 +249,11 @@ export class AiPlannerService {
       `请输出以下 JSON 结构，不要使用 Markdown：\n` +
       `{"summary":"计划思路和必要取舍","steps":[` +
       `{"title":"具体且可验证的动作","project":"项目名称","tag":"标签",` +
-      `"note":"执行说明","estimatedPomodoros":1,"reason":"安排原因"}]}\n` +
-      `要求：步骤按执行顺序排列，最多 12 步；每步预计 1 到 20 个番茄；` +
+      `"note":"可检查的完成标准","estimatedPomodoros":1,"reason":"安排原因"}]}\n` +
+      `要求：步骤按执行顺序排列，最多 12 步；每步预计 1 到 4 个番茄；` +
+      `标题必须包含具体动作和对象，note 必须说明完成后能检查到什么；` +
+      `禁止使用“研究一下、了解一下、完善内容、继续学习、推进任务”等空泛步骤；` +
+      `最后一步必须包含检查、提交、导出、保存或交付动作；` +
       `不要把休息列为任务。若时间不足，优先给出最小可交付成果并在 summary 中说明。`;
   }
 
@@ -273,7 +277,7 @@ export class AiPlannerService {
         project: typeof step.project === 'string' ? step.project.trim() : '',
         tag: typeof step.tag === 'string' ? step.tag.trim() : '',
         note: typeof step.note === 'string' ? step.note.trim() : '',
-        estimatedPomodoros: Math.max(1, Math.min(20, Math.round(estimate))),
+        estimatedPomodoros: Math.max(1, Math.min(12, Math.round(estimate))),
         reason: typeof step.reason === 'string' ? step.reason.trim() : '',
         completed: false
       });
@@ -330,7 +334,9 @@ export class AiPlannerService {
       `{"reply":"给用户的简短中文回复","summary":"当前计划思路",` +
       `"steps":[{"title":"具体动作","project":"项目","tag":"标签",` +
       `"note":"完成标准","estimatedPomodoros":1,"reason":"安排原因","completed":false}]}\n` +
-      `必须返回完整的当前计划，而不是只返回变更部分。最多 12 步，每步 1 到 20 个番茄。` +
+      `必须返回完整的当前计划，而不是只返回变更部分。最多 12 步，每步 1 到 4 个番茄。` +
+      `标题必须包含具体动作和对象，note 必须是可检查的完成标准。` +
+      `禁止“研究一下、完善内容、继续学习、推进任务”等空泛步骤，最后一步必须形成明确交付。` +
       `保留已经完成且仍相关的步骤；用户要求调整时应重新估算。不要把休息列为任务。\n` +
       `长期与短期记忆：${JSON.stringify(memory)}\n` +
       `目标偏移判断：${JSON.stringify(goalDrift)}\n` +
@@ -346,8 +352,9 @@ export class AiPlannerService {
     deadline: string, workMinutes: number, breakMinutes: number): Promise<AiPlanResult> {
     const normalizedEndpoint = endpoint.trim();
     const normalizedGoal = goal.trim();
-    if (normalizedGoal.length < 4) {
-      return AiPlannerService.failure('请更具体地描述你想完成的目标');
+    const readiness = AiGoalReadinessHelper.evaluate(normalizedGoal);
+    if (!readiness.ready) {
+      return AiPlannerService.failure(readiness.question);
     }
     if (!AiPlannerService.isAllowedEndpoint(normalizedEndpoint)) {
       return AiPlannerService.failure('请填写 HTTPS 服务地址；本机调试可使用 localhost 或 127.0.0.1');
@@ -395,8 +402,9 @@ export class AiPlannerService {
     if (normalizedKey.length < 10) {
       return AiPlannerService.failure('请填写有效的 DeepSeek API Key');
     }
-    if (normalizedGoal.length < 4) {
-      return AiPlannerService.failure('请更具体地描述你想完成的目标');
+    const readiness = AiGoalReadinessHelper.evaluate(normalizedGoal);
+    if (!readiness.ready) {
+      return AiPlannerService.failure(readiness.question);
     }
     const selectedModel = model === 'deepseek-v4-pro' ? 'deepseek-v4-pro' : 'deepseek-v4-flash';
     const normalizedAvailableMinutes = Math.max(workMinutes, Math.min(1440, Math.round(availableMinutes)));

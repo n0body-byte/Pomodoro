@@ -97,6 +97,16 @@ export interface AiPlanQualityInsight {
   title: string;
   description: string;
   improvementPrompt: string;
+  canApply: boolean;
+  blockingIssues: string[];
+}
+
+export interface AiGoalReadinessInsight {
+  ready: boolean;
+  status: string;
+  title: string;
+  description: string;
+  question: string;
 }
 
 export interface AiAgentMemory {

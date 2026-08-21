@@ -7,6 +7,7 @@ import { AiAgentDecisionHelper } from '../main/ets/utils/AiAgentDecisionHelper';
 import { AiAgentP1Helper, AiExecutionRecord } from '../main/ets/utils/AiAgentP1Helper';
 import { LocalFallbackPlanHelper } from '../main/ets/utils/LocalFallbackPlanHelper';
 import { AiPlanQualityHelper } from '../main/ets/utils/AiPlanQualityHelper';
+import { AiGoalReadinessHelper } from '../main/ets/utils/AiGoalReadinessHelper';
 import { AiPlanProgressHelper } from '../main/ets/utils/AiPlanProgressHelper';
 import { AiPlanVersionHelper } from '../main/ets/utils/AiPlanVersionHelper';
 import { AiPlannerService } from '../main/ets/utils/AiPlannerService';
@@ -194,9 +195,50 @@ export default function localUnitTest() {
       const insight = AiPlanInsightHelper.calculate(steps, 60, 25, 5);
       const quality = AiPlanQualityHelper.evaluate(steps, insight);
       expect(quality.score < 65).assertTrue();
-      expect(quality.status).assertEqual('weak');
+      expect(quality.status).assertEqual('blocked');
+      expect(quality.canApply).assertFalse();
       expect(quality.improvementPrompt.indexOf('超出可用时间') >= 0).assertTrue();
       expect(quality.improvementPrompt.indexOf('重复步骤') >= 0).assertTrue();
+    });
+
+    it('goalReadinessRejectsVagueDirection', 0, () => {
+      const learning = AiGoalReadinessHelper.evaluate('学习英语');
+      const improving = AiGoalReadinessHelper.evaluate('完善项目');
+      expect(learning.ready).assertFalse();
+      expect(learning.question.indexOf('结果') >= 0).assertTrue();
+      expect(improving.ready).assertFalse();
+    });
+
+    it('goalReadinessAcceptsVerifiableOutcome', 0, () => {
+      const result = AiGoalReadinessHelper.evaluate('今晚完成两套四级听力并整理错题');
+      expect(result.ready).assertTrue();
+      expect(result.status).assertEqual('ready');
+    });
+
+    it('planQualityBlocksVagueStep', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '研究一下', project: '比赛', tag: '', note: '看看相关内容', estimatedPomodoros: 1,
+          reason: '先了解情况', completed: false },
+        { title: '检查并提交', project: '比赛', tag: '', note: '检查结果并完成提交', estimatedPomodoros: 1,
+          reason: '形成最终交付', completed: false }
+      ];
+      const quality = AiPlanQualityHelper.evaluate(
+        steps, AiPlanInsightHelper.calculate(steps, 90, 25, 5));
+      expect(quality.canApply).assertFalse();
+      expect(quality.description.indexOf('空泛动作') >= 0).assertTrue();
+    });
+
+    it('planQualityBlocksOversizedStep', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '完成报告主体', project: '报告', tag: '', note: '写完三个核心章节', estimatedPomodoros: 5,
+          reason: '形成主体成果', completed: false },
+        { title: '检查并提交', project: '报告', tag: '', note: '检查格式并完成提交', estimatedPomodoros: 1,
+          reason: '形成最终交付', completed: false }
+      ];
+      const quality = AiPlanQualityHelper.evaluate(
+        steps, AiPlanInsightHelper.calculate(steps, 240, 25, 5));
+      expect(quality.canApply).assertFalse();
+      expect(quality.improvementPrompt.indexOf('超过 4 个番茄') >= 0).assertTrue();
     });
 
     it('deepSeekDiagnosticAcceptsAvailableModel', 0, () => {
@@ -398,6 +440,18 @@ export default function localUnitTest() {
       expect(plan.steps[0].estimatedPomodoros + plan.steps[1].estimatedPomodoros +
         plan.steps[2].estimatedPomodoros).assertEqual(4);
       expect(plan.steps[2].title.indexOf('交付') >= 0).assertTrue();
+    });
+
+    it('localFallbackKeepsEveryStepSmall', 0, () => {
+      const plan = LocalFallbackPlanHelper.create('完成复赛演示文档', 360, '周五 18:00', 25, 5);
+      let largest = 0;
+      for (const step of plan.steps) {
+        largest = Math.max(largest, step.estimatedPomodoros);
+      }
+      expect(largest <= 4).assertTrue();
+      const quality = AiPlanQualityHelper.evaluate(
+        plan.steps, AiPlanInsightHelper.calculate(plan.steps, 360, 25, 5));
+      expect(quality.canApply).assertTrue();
     });
 
     it('aiPlanCompletionReturnsNextStep', 0, () => {
