@@ -15,6 +15,7 @@ import { CrossDeviceContinuationHelper } from '../main/ets/utils/CrossDeviceCont
 import { AiExecutionCheckInHelper } from '../main/ets/utils/AiExecutionCheckInHelper';
 import { AiRequestTraceHelper } from '../main/ets/utils/AiRequestTraceHelper';
 import { AiDeadlineHelper } from '../main/ets/utils/AiDeadlineHelper';
+import { AiTokenBudgetHelper } from '../main/ets/utils/AiTokenBudgetHelper';
 import {
   AiAgentResult,
   AiAgentState,
@@ -713,6 +714,28 @@ export default function localUnitTest() {
       const insight = AiDeadlineHelper.evaluate('尽快完成', 120, now);
       expect(insight.status).assertEqual('unsupported');
       expect(insight.description.length > 0).assertTrue();
+    });
+
+    it('aiTokenBudgetWarnsNearLimit', 0, () => {
+      const healthy = AiTokenBudgetHelper.evaluate(30000, 12000);
+      const warning = AiTokenBudgetHelper.evaluate(30000, 25000);
+      expect(healthy.status).assertEqual('healthy');
+      expect(warning.status).assertEqual('warning');
+      expect(warning.remaining).assertEqual(5000);
+      expect(warning.canRequest).assertTrue();
+    });
+
+    it('aiTokenBudgetStopsNewRequestAtLimit', 0, () => {
+      const exhausted = AiTokenBudgetHelper.evaluate(10000, 11000);
+      expect(exhausted.status).assertEqual('exhausted');
+      expect(exhausted.remaining).assertEqual(0);
+      expect(exhausted.canRequest).assertFalse();
+    });
+
+    it('aiTokenBudgetAccumulatesOnlyValidUsage', 0, () => {
+      expect(AiTokenBudgetHelper.addUsage(8000, 1500)).assertEqual(9500);
+      expect(AiTokenBudgetHelper.addUsage(8000, -100)).assertEqual(8000);
+      expect(AiTokenBudgetHelper.normalizeBudget(5000)).assertEqual(10000);
     });
   });
 }

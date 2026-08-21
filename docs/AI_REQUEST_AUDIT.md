@@ -27,4 +27,6 @@
 
 记录随当前 Agent 状态与历史对话保存，新对话拥有独立审计链。HarmonyOS 应用接续会迁移当前会话的调用记录，但仍不会迁移 API Key。
 
-单元测试覆盖 usage 捕获、远端响应判断和最近 20 条上限。当前项目共 `57/57` 项单元测试通过，HAP 构建通过。
+调用审计中的 `usage.total_tokens` 同时进入对话级 Token 预算；达到上限后会阻止新的 DeepSeek 请求。详见 [DeepSeek Token 预算说明](AI_TOKEN_BUDGET.md)。
+
+单元测试覆盖 usage 捕获、远端响应判断和最近 20 条上限。当前项目共 `60/60` 项单元测试通过，HAP 构建通过。

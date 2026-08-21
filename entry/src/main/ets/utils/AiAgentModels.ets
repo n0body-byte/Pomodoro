@@ -68,6 +68,8 @@ export interface AiAgentState {
   previousPlan?: AiPlanSnapshot;
   lastExecutionCheckIn?: AiExecutionCheckIn;
   requestTraces?: AiRequestTrace[];
+  tokenBudget?: number;
+  consumedTokens?: number;
 }
 
 export interface AiConversationSummary {

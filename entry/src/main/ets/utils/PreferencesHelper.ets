@@ -838,7 +838,11 @@ export class PreferencesHelper {
         planSource: typeof state.planSource === 'string' ? state.planSource : 'none',
         previousPlan: previousPlan,
         lastExecutionCheckIn: lastExecutionCheckIn,
-        requestTraces: requestTraces
+        requestTraces: requestTraces,
+        tokenBudget: typeof state.tokenBudget === 'number' ?
+          Math.max(10000, Math.min(100000, Math.round(state.tokenBudget))) : 30000,
+        consumedTokens: typeof state.consumedTokens === 'number' ?
+          Math.max(0, Math.round(state.consumedTokens)) : 0
       };
     } catch {
       return emptyState;
@@ -985,7 +989,9 @@ export class PreferencesHelper {
       planSource: state.planSource,
       previousPlan: state.previousPlan,
       lastExecutionCheckIn: undefined,
-      requestTraces: state.requestTraces
+      requestTraces: state.requestTraces,
+      tokenBudget: state.tokenBudget,
+      consumedTokens: state.consumedTokens
     };
     if (isActiveConversation) {
       await PreferencesHelper.saveAiAgentState(context, updatedState);

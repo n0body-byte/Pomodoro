@@ -70,7 +70,9 @@ export class CrossDeviceContinuationHelper {
       planSource: state.planSource,
       previousPlan: state.previousPlan,
       lastExecutionCheckIn: state.lastExecutionCheckIn,
-      requestTraces: state.requestTraces
+      requestTraces: state.requestTraces,
+      tokenBudget: state.tokenBudget,
+      consumedTokens: state.consumedTokens
     };
   }
 

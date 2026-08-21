@@ -11,6 +11,11 @@ import { AiExecutionCheckInHelper } from '../utils/AiExecutionCheckInHelper';
 import { AiRequestTraceHelper } from '../utils/AiRequestTraceHelper';
 import { AiDeadlineHelper, AiDeadlineInsight } from '../utils/AiDeadlineHelper';
 import {
+  AiTokenBudgetHelper,
+  AiTokenBudgetInsight,
+  DEFAULT_AI_TOKEN_BUDGET
+} from '../utils/AiTokenBudgetHelper';
+import {
   AiAgentDecision,
   AiAgentMemory,
   AiAgentResult,
@@ -94,6 +99,8 @@ export struct AiPlanner {
   @State executionCheckInDraft: string = '';
   @State requestTraces: AiRequestTrace[] = [];
   @State showRequestTraces: boolean = false;
+  @State tokenBudget: number = DEFAULT_AI_TOKEN_BUDGET;
+  @State consumedTokens: number = 0;
   onApplyStep?: (step: AiPlanStep, conversationId: string) => void;
   onStartStep?: (step: AiPlanStep, conversationId: string) => void;
 
@@ -194,6 +201,10 @@ export struct AiPlanner {
       state.lastExecutionReplanKey : '';
     this.lastExecutionCheckIn = state.lastExecutionCheckIn;
     this.requestTraces = Array.isArray(state.requestTraces) ? state.requestTraces : [];
+    this.tokenBudget = AiTokenBudgetHelper.normalizeBudget(
+      typeof state.tokenBudget === 'number' ? state.tokenBudget : DEFAULT_AI_TOKEN_BUDGET);
+    this.consumedTokens = typeof state.consumedTokens === 'number' ?
+      Math.max(0, Math.round(state.consumedTokens)) : 0;
     this.executionCheckInDraft = state.needsReview && state.lastExecutionCheckIn !== undefined &&
       state.lastExecutionCheckIn.stepTitle === state.lastCompletedStepTitle &&
       (this.lastCompletedStepProject.length === 0 ||
@@ -259,7 +270,9 @@ export struct AiPlanner {
       planSource: this.planSource,
       previousPlan: this.createPreviousPlanSnapshot(),
       lastExecutionCheckIn: this.lastExecutionCheckIn,
-      requestTraces: this.requestTraces
+      requestTraces: this.requestTraces,
+      tokenBudget: this.tokenBudget,
+      consumedTokens: this.consumedTokens
     };
   }
 
@@ -355,6 +368,7 @@ export struct AiPlanner {
     this.executionCheckInDraft = '';
     this.requestTraces = [];
     this.showRequestTraces = false;
+    this.consumedTokens = 0;
     this.planSource = 'none';
     this.clearPreviousPlan();
     this.successMessage = '已开始新对话';
@@ -864,6 +878,20 @@ export struct AiPlanner {
     const trace = AiRequestTraceHelper.create(
       action, this.deepSeekModel, startedAt, Date.now(), result, status, statusDetail);
     this.requestTraces = AiRequestTraceHelper.append(this.requestTraces, trace);
+    this.consumedTokens = AiTokenBudgetHelper.addUsage(
+      this.consumedTokens, result.usage.totalTokens);
+  }
+
+  private getTokenBudgetInsight(): AiTokenBudgetInsight {
+    return AiTokenBudgetHelper.evaluate(this.tokenBudget, this.consumedTokens);
+  }
+
+  private async updateTokenBudget(value: number): Promise<void> {
+    this.tokenBudget = AiTokenBudgetHelper.normalizeBudget(value);
+    this.errorMessage = '';
+    if (this.hasCurrentConversation()) {
+      await this.saveAgentState(this.needsReview);
+    }
   }
 
   private async askAgent(message: string): Promise<boolean> {
@@ -876,6 +904,10 @@ export struct AiPlanner {
       return false;
     }
     if (!this.prepareDeadline()) {
+      return false;
+    }
+    if (this.serviceMode === 'deepseek' && !this.getTokenBudgetInsight().canRequest) {
+      this.errorMessage = '本对话 Token 预算已用完，请提高预算或新建对话后再调用 DeepSeek';
       return false;
     }
     if (this.serviceMode === 'deepseek' && this.apiKey.trim().length < 10) {
@@ -921,6 +953,13 @@ export struct AiPlanner {
         if (!quality.canApply) {
           this.recordRequestTrace(requestAction, requestStartedAt, result,
             'quality_rejected', '返回计划未通过本地质量门，已进入一次自动修复');
+          if (!this.getTokenBudgetInsight().canRequest) {
+            this.errorMessage = `AI 首版计划未通过质量门：${quality.description}` +
+              '本对话 Token 预算已用完，已停止自动修复。';
+            this.lastFailedMessage = normalized;
+            await this.saveAgentState(this.needsReview);
+            return false;
+          }
           const repairStartedAt = Date.now();
           const repairResult: AiAgentResult = await AiPlannerService.continueDeepSeekAgent(
             this.apiKey, this.deepSeekModel, quality.improvementPrompt,
@@ -1159,6 +1198,53 @@ export struct AiPlanner {
   private hasCurrentExecutionCheckIn(): boolean {
     return AiExecutionCheckInHelper.matchesStep(
       this.lastExecutionCheckIn, this.lastCompletedStepTitle, this.lastCompletedStepProject);
+  }
+
+  @Builder
+  private tokenBudgetCard(insight: AiTokenBudgetInsight) {
+    if (this.serviceMode === 'deepseek') {
+      Column({ space: 9 }) {
+        Row({ space: 8 }) {
+          Column({ space: 2 }) {
+            Text('本对话 Token 预算').fontSize(13).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary')).width('100%')
+            Text(`${insight.consumed} / ${insight.budget} tokens · ${insight.percent}%`)
+              .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          Text(insight.status === 'exhausted' ? '已停止调用' :
+            (insight.status === 'warning' ? '接近上限' : '预算正常'))
+            .fontSize(9).fontWeight(FontWeight.Bold)
+            .fontColor(insight.status === 'healthy' ?
+              $r('app.color.primary_green') : $r('app.color.primary_red'))
+            .padding({ left: 8, right: 8, top: 5, bottom: 5 })
+            .backgroundColor($r('app.color.ring_track')).borderRadius(11)
+        }.width('100%')
+        Text(insight.description).fontSize(10).lineHeight(15)
+          .fontColor($r('app.color.text_secondary')).width('100%')
+        Row({ space: 8 }) {
+          Button('1 万').layoutWeight(1).height(30).fontSize(9).borderRadius(15)
+            .backgroundColor(this.tokenBudget === 10000 ?
+              $r('app.color.primary_green') : $r('app.color.ring_track'))
+            .fontColor(this.tokenBudget === 10000 ? Color.Black : $r('app.color.text_secondary'))
+            .onClick(() => this.updateTokenBudget(10000))
+          Button('3 万').layoutWeight(1).height(30).fontSize(9).borderRadius(15)
+            .backgroundColor(this.tokenBudget === 30000 ?
+              $r('app.color.primary_green') : $r('app.color.ring_track'))
+            .fontColor(this.tokenBudget === 30000 ? Color.Black : $r('app.color.text_secondary'))
+            .onClick(() => this.updateTokenBudget(30000))
+          Button('6 万').layoutWeight(1).height(30).fontSize(9).borderRadius(15)
+            .backgroundColor(this.tokenBudget === 60000 ?
+              $r('app.color.primary_green') : $r('app.color.ring_track'))
+            .fontColor(this.tokenBudget === 60000 ? Color.Black : $r('app.color.text_secondary'))
+            .onClick(() => this.updateTokenBudget(60000))
+        }.width('100%')
+        Text('预算按服务端 usage 累计；单次请求可能略微越过剩余额度。')
+          .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+      }
+      .width('100%').padding(13).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: insight.status === 'healthy' ?
+        $r('app.color.card_border') : $r('app.color.primary_red') }).borderRadius(15)
+    }
   }
 
   @Builder
@@ -1989,6 +2075,7 @@ export struct AiPlanner {
   private plannerControlPane() {
     Column({ space: 12 }) {
       this.serviceCard()
+      this.tokenBudgetCard(this.getTokenBudgetInsight())
       this.requestTraceCard()
       this.contextCard()
       this.agentMemoryCard()
