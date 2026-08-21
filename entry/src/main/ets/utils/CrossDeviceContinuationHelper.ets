@@ -26,8 +26,11 @@ export interface ContinuationParseResult {
 export interface ContinuationRestoreResult {
   success: boolean;
   duplicate: boolean;
+  stale: boolean;
   message: string;
 }
+
+export type ContinuationTransferDecision = 'accept' | 'duplicate' | 'stale';
 
 export class CrossDeviceContinuationHelper {
   private static copyRecentMessages(messages: AiChatMessage[]): AiChatMessage[] {
@@ -192,6 +195,17 @@ export class CrossDeviceContinuationHelper {
     }
   }
 
+  static decideTransfer(previousTransferId: string, previousTransferredAt: number,
+    snapshot: PomodoroContinuationSnapshot): ContinuationTransferDecision {
+    if (previousTransferId === snapshot.transferId) {
+      return 'duplicate';
+    }
+    if (previousTransferredAt > 0 && snapshot.transferredAt <= previousTransferredAt) {
+      return 'stale';
+    }
+    return 'accept';
+  }
+
   static async capture(context: Context, now: number = Date.now()): Promise<string> {
     const timerState = await PreferencesHelper.loadTimerState(context);
     const taskContext = await PreferencesHelper.loadTaskContext(context);
@@ -204,12 +218,19 @@ export class CrossDeviceContinuationHelper {
   static async restore(context: Context, serialized: string): Promise<ContinuationRestoreResult> {
     const parsed = CrossDeviceContinuationHelper.parse(serialized);
     if (!parsed.success || parsed.snapshot === undefined) {
-      return { success: false, duplicate: false, message: parsed.message };
+      return { success: false, duplicate: false, stale: false, message: parsed.message };
     }
     const snapshot = parsed.snapshot;
     const previousTransferId = await PreferencesHelper.loadContinuationTransferId(context);
-    if (previousTransferId === snapshot.transferId) {
-      return { success: true, duplicate: true, message: '该接续状态已应用，无需重复恢复' };
+    const previousTransferredAt = await PreferencesHelper.loadContinuationTransferredAt(context);
+    const decision = CrossDeviceContinuationHelper.decideTransfer(
+      previousTransferId, previousTransferredAt, snapshot);
+    if (decision === 'duplicate') {
+      return { success: true, duplicate: true, stale: false, message: '该接续状态已应用，无需重复恢复' };
+    }
+    if (decision === 'stale') {
+      return { success: false, duplicate: false, stale: true,
+        message: '接续状态早于本机已恢复版本，已拒绝覆盖' };
     }
     try {
       if (snapshot.timerState !== null) {
@@ -220,10 +241,12 @@ export class CrossDeviceContinuationHelper {
       await PreferencesHelper.saveTaskContext(context, snapshot.taskContext);
       await PreferencesHelper.saveAiAgentState(context, snapshot.agentState);
       await PreferencesHelper.mergeSessionHistory(context, snapshot.recentSessions);
-      await PreferencesHelper.saveContinuationTransferId(context, snapshot.transferId);
-      return { success: true, duplicate: false, message: '已恢复计时、任务和智能体计划' };
+      await PreferencesHelper.saveContinuationMarker(
+        context, snapshot.transferId, snapshot.transferredAt);
+      return { success: true, duplicate: false, stale: false,
+        message: '已恢复计时、任务和智能体计划' };
     } catch {
-      return { success: false, duplicate: false, message: '接续状态写入失败' };
+      return { success: false, duplicate: false, stale: false, message: '接续状态写入失败' };
     }
   }
 }

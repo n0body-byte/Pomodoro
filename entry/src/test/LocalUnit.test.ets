@@ -643,6 +643,22 @@ export default function localUnitTest() {
       expect(CrossDeviceContinuationHelper.parse(unsupported).success).assertFalse();
     });
 
+    it('continuationRejectsDuplicateAndOlderTransfers', 0, () => {
+      const agentState: AiAgentState = {
+        id: '', title: '', createdAt: 0, messages: [], plan: { summary: '', steps: [] },
+        updatedAt: 0, needsReview: false, lastCompletedStepTitle: ''
+      };
+      const snapshot = CrossDeviceContinuationHelper.createSnapshot(null, {
+        task: '', project: '', tag: '', note: '', estimatedPomodoros: 1
+      }, agentState, [], 2000);
+      expect(CrossDeviceContinuationHelper.decideTransfer(snapshot.transferId, 2000, snapshot))
+        .assertEqual('duplicate');
+      expect(CrossDeviceContinuationHelper.decideTransfer('newer-transfer', 3000, snapshot))
+        .assertEqual('stale');
+      expect(CrossDeviceContinuationHelper.decideTransfer('older-transfer', 1000, snapshot))
+        .assertEqual('accept');
+    });
+
     it('continuationHistoryMergeIsIdempotent', 0, () => {
       const existing: SessionRecord[] = [
         { id: 'record-1', date: '2026-08-21', workSeconds: 1500, completedAt: 100,

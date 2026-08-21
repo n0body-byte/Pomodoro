@@ -25,6 +25,7 @@ import {
   PREF_KEY_AI_CONVERSATION_PREFIX,
   PREF_KEY_AI_AUTO_REVIEW,
   PREF_KEY_CONTINUATION_TRANSFER_ID,
+  PREF_KEY_CONTINUATION_TRANSFERRED_AT,
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET,
@@ -236,9 +237,20 @@ export class PreferencesHelper {
     }
   }
 
-  static async saveContinuationTransferId(context: Context, transferId: string): Promise<void> {
+  static async loadContinuationTransferredAt(context: Context): Promise<number> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_CONTINUATION_TRANSFERRED_AT, 0) as number;
+    } catch {
+      return 0;
+    }
+  }
+
+  static async saveContinuationMarker(context: Context, transferId: string,
+    transferredAt: number): Promise<void> {
     const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
     await prefs.put(PREF_KEY_CONTINUATION_TRANSFER_ID, transferId);
+    await prefs.put(PREF_KEY_CONTINUATION_TRANSFERRED_AT, transferredAt);
     await prefs.flush();
   }
 
