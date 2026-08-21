@@ -12,6 +12,7 @@ import { AiPlanProgressHelper } from '../main/ets/utils/AiPlanProgressHelper';
 import { AiPlanVersionHelper } from '../main/ets/utils/AiPlanVersionHelper';
 import { AiPlannerService } from '../main/ets/utils/AiPlannerService';
 import { CrossDeviceContinuationHelper } from '../main/ets/utils/CrossDeviceContinuationHelper';
+import { AiExecutionCheckInHelper } from '../main/ets/utils/AiExecutionCheckInHelper';
 import {
   AiAgentState,
   AiChatMessage,
@@ -479,6 +480,42 @@ export default function localUnitTest() {
       expect(AiPlanProgressHelper.isTrackedConversation('manual', 'conversation-1', 'conversation-1')).assertFalse();
       expect(AiPlanProgressHelper.isTrackedConversation('ai', 'conversation-1', 'conversation-2')).assertFalse();
       expect(AiPlanProgressHelper.isTrackedConversation('ai', '', '')).assertFalse();
+    });
+
+    it('executionCheckInAcceptsVerifiableEvidence', 0, () => {
+      const result = AiExecutionCheckInHelper.validate('achieved', '已导出 demo.mp4 并完成播放检查');
+      expect(result.ready).assertTrue();
+    });
+
+    it('executionCheckInRejectsVagueClaim', 0, () => {
+      expect(AiExecutionCheckInHelper.validate('achieved', '完成了').ready).assertFalse();
+      expect(AiExecutionCheckInHelper.validate('blocked', '有问题').ready).assertFalse();
+    });
+
+    it('partialCheckInReopensProvisionalStep', 0, () => {
+      const plan: AiPlan = { summary: '交付演示', steps: [
+        { title: '录制演示视频', project: '复赛', tag: '演示', note: '导出五分钟视频',
+          estimatedPomodoros: 2, reason: '形成提交材料', completed: true }
+      ] };
+      const checkIn = AiExecutionCheckInHelper.create(
+        '录制演示视频', '复赛', 'partial', '已录制前三分钟，剩余 Agent 演示', 1000);
+      expect(checkIn !== undefined).assertTrue();
+      if (checkIn !== undefined) {
+        const updated = AiExecutionCheckInHelper.applyOutcome(plan, checkIn);
+        expect(updated.steps[0].completed).assertFalse();
+        expect(plan.steps[0].completed).assertTrue();
+      }
+    });
+
+    it('executionCheckInBuildsGroundedReviewMessage', 0, () => {
+      const checkIn = AiExecutionCheckInHelper.create(
+        '联调登录接口', '复赛', 'blocked', '接口返回 401，等待服务端确认权限', 1000);
+      expect(checkIn !== undefined).assertTrue();
+      if (checkIn !== undefined) {
+        const message = AiExecutionCheckInHelper.buildReviewMessage(checkIn);
+        expect(message.indexOf('接口返回 401') >= 0).assertTrue();
+        expect(message.indexOf('不要把该步骤视为已完成') >= 0).assertTrue();
+      }
     });
 
     it('aiPlanVersionCapturesChangedExecutablePlan', 0, () => {

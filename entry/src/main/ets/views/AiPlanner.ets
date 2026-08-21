@@ -7,6 +7,7 @@ import { LocalFallbackPlanHelper } from '../utils/LocalFallbackPlanHelper';
 import { AiGoalReadinessHelper } from '../utils/AiGoalReadinessHelper';
 import { AiPlanQualityHelper } from '../utils/AiPlanQualityHelper';
 import { AiPlanVersionHelper } from '../utils/AiPlanVersionHelper';
+import { AiExecutionCheckInHelper } from '../utils/AiExecutionCheckInHelper';
 import {
   AiAgentDecision,
   AiAgentMemory,
@@ -14,6 +15,7 @@ import {
   AiAgentState,
   AiChatMessage,
   AiConversationSummary,
+  AiExecutionCheckIn,
   AiExecutionInsight,
   AiFocusContext,
   AiGoalDriftInsight,
@@ -62,6 +64,7 @@ export struct AiPlanner {
   @State successMessage: string = '';
   @State needsReview: boolean = false;
   @State lastCompletedStepTitle: string = '';
+  @State lastCompletedStepProject: string = '';
   @State lastTotalTokens: number = 0;
   @State conversationId: string = '';
   @State conversationTitle: string = '';
@@ -84,6 +87,8 @@ export struct AiPlanner {
   @State previousPlanSteps: AiPlanStep[] = [];
   @State previousPlanSource: string = 'none';
   @State previousPlanSavedAt: number = 0;
+  @State lastExecutionCheckIn: AiExecutionCheckIn | undefined = undefined;
+  @State executionCheckInDraft: string = '';
   onApplyStep?: (step: AiPlanStep, conversationId: string) => void;
 
   private examples: string[] = [
@@ -161,6 +166,8 @@ export struct AiPlanner {
     this.planSteps = steps;
     this.needsReview = state.needsReview;
     this.lastCompletedStepTitle = state.lastCompletedStepTitle;
+    this.lastCompletedStepProject = typeof state.lastCompletedStepProject === 'string' ?
+      state.lastCompletedStepProject : '';
     this.conversationId = state.id;
     this.conversationTitle = state.title;
     this.conversationCreatedAt = state.createdAt;
@@ -179,6 +186,12 @@ export struct AiPlanner {
       state.lastAutoReviewAttemptTitle : '';
     this.lastExecutionReplanKey = typeof state.lastExecutionReplanKey === 'string' ?
       state.lastExecutionReplanKey : '';
+    this.lastExecutionCheckIn = state.lastExecutionCheckIn;
+    this.executionCheckInDraft = state.needsReview && state.lastExecutionCheckIn !== undefined &&
+      state.lastExecutionCheckIn.stepTitle === state.lastCompletedStepTitle &&
+      (this.lastCompletedStepProject.length === 0 ||
+        state.lastExecutionCheckIn.project === this.lastCompletedStepProject) ?
+      state.lastExecutionCheckIn.detail : '';
     this.planSource = typeof state.planSource === 'string' ? state.planSource :
       (state.plan.summary.indexOf('本地应急计划：') === 0 ? 'local' :
         (state.plan.steps.length > 0 ? 'ai' : 'none'));
@@ -228,6 +241,7 @@ export struct AiPlanner {
       updatedAt: now,
       needsReview: this.needsReview,
       lastCompletedStepTitle: this.lastCompletedStepTitle,
+      lastCompletedStepProject: this.lastCompletedStepProject,
       availableMinutes: this.availableMinutes,
       deadline: this.deadline,
       primaryGoal: this.primaryGoal,
@@ -236,7 +250,8 @@ export struct AiPlanner {
       lastAutoReviewAttemptTitle: this.lastAutoReviewAttemptTitle,
       lastExecutionReplanKey: this.lastExecutionReplanKey,
       planSource: this.planSource,
-      previousPlan: this.createPreviousPlanSnapshot()
+      previousPlan: this.createPreviousPlanSnapshot(),
+      lastExecutionCheckIn: this.lastExecutionCheckIn
     };
   }
 
@@ -318,6 +333,7 @@ export struct AiPlanner {
     this.followUp = '';
     this.needsReview = false;
     this.lastCompletedStepTitle = '';
+    this.lastCompletedStepProject = '';
     this.lastTotalTokens = 0;
     this.errorMessage = '';
     this.lastFailedMessage = '';
@@ -327,6 +343,8 @@ export struct AiPlanner {
     this.executionInsight = AiAgentP1Helper.emptyExecution();
     this.lastAutoReviewAttemptTitle = '';
     this.lastExecutionReplanKey = '';
+    this.lastExecutionCheckIn = undefined;
+    this.executionCheckInDraft = '';
     this.planSource = 'none';
     this.clearPreviousPlan();
     this.successMessage = '已开始新对话';
@@ -541,7 +559,7 @@ export struct AiPlanner {
     this.autoReviewEnabled = enabled;
     await PreferencesHelper.saveAiAutoReview(this.getContext(), enabled);
     if (enabled) {
-      this.successMessage = '已开启自动复盘；完成计划步骤后会调用 DeepSeek';
+      this.successMessage = '已开启自动复盘；记录执行结果后会调用 DeepSeek';
       await this.tryAutoReview();
     } else {
       this.successMessage = '已关闭自动复盘';
@@ -551,6 +569,8 @@ export struct AiPlanner {
   private async tryAutoReview(): Promise<void> {
     if (!this.autoReviewEnabled || this.serviceMode !== 'deepseek' || !this.isServiceReady() ||
       !this.needsReview || this.lastCompletedStepTitle.length === 0 || this.isLoading ||
+      !AiExecutionCheckInHelper.matchesStep(this.lastExecutionCheckIn,
+        this.lastCompletedStepTitle, this.lastCompletedStepProject) ||
       this.lastAutoReviewAttemptTitle === this.lastCompletedStepTitle) {
       return;
     }
@@ -915,10 +935,16 @@ export struct AiPlanner {
 
   private async reviewCompletedStep(): Promise<void> {
     const title = this.lastCompletedStepTitle.length > 0 ? this.lastCompletedStepTitle : '刚才的任务';
+    if (!AiExecutionCheckInHelper.matchesStep(this.lastExecutionCheckIn,
+      title, this.lastCompletedStepProject) ||
+      this.lastExecutionCheckIn === undefined) {
+      this.errorMessage = '请先核验这一步的实际产出，再让 Agent 复盘';
+      return;
+    }
     const executionKey = this.executionInsight.shouldReplan ?
       this.getExecutionReplanKey(this.executionInsight) : '';
-    const message = `我刚完成了“${title}”。请根据最新专注数据复盘完成情况，` +
-      `判断后续计划是否需要调整，并告诉我下一轮最应该做什么。`;
+    const message = AiExecutionCheckInHelper.buildReviewMessage(this.lastExecutionCheckIn) +
+      '请结合最新专注数据复盘，判断后续计划是否需要调整，并告诉我下一轮最应该做什么。';
     if (await this.askAgent(message) && executionKey.length > 0) {
       this.lastExecutionReplanKey = executionKey;
       await this.refreshAgentAnalysis();
@@ -952,8 +978,11 @@ export struct AiPlanner {
     }
     this.planSteps = steps;
     const changed = this.planSteps[stepIndex];
+    this.lastExecutionCheckIn = undefined;
+    this.executionCheckInDraft = '';
     if (changed !== undefined && changed.completed) {
       this.lastCompletedStepTitle = changed.title;
+      this.lastCompletedStepProject = changed.project;
       this.lastAutoReviewAttemptTitle = '';
       this.needsReview = true;
     } else {
@@ -961,6 +990,34 @@ export struct AiPlanner {
     }
     await this.refreshAgentAnalysis();
     await this.saveAgentState(this.needsReview);
+    await this.tryAutoReview();
+  }
+
+  private async submitExecutionCheckIn(outcome: string): Promise<void> {
+    const validation = AiExecutionCheckInHelper.validate(outcome, this.executionCheckInDraft);
+    if (!validation.ready) {
+      this.errorMessage = validation.message;
+      return;
+    }
+    const checkIn = AiExecutionCheckInHelper.create(
+      this.lastCompletedStepTitle, this.lastCompletedStepProject, outcome,
+      this.executionCheckInDraft, Date.now());
+    if (checkIn === undefined) {
+      this.errorMessage = validation.message;
+      return;
+    }
+    this.lastExecutionCheckIn = checkIn;
+    const updatedPlan = AiExecutionCheckInHelper.applyOutcome(
+      { summary: this.summary, steps: this.planSteps }, checkIn);
+    this.planSteps = updatedPlan.steps;
+    this.lastAutoReviewAttemptTitle = '';
+    this.needsReview = true;
+    this.errorMessage = '';
+    this.successMessage = checkIn.outcome === 'achieved' ?
+      '已记录可核验交付，Agent 将据此复盘' :
+      '已保留该步骤为未完成，Agent 将据此调整计划';
+    await this.refreshAgentAnalysis();
+    await this.saveAgentState(true);
     await this.tryAutoReview();
   }
 
@@ -976,6 +1033,55 @@ export struct AiPlanner {
 
   private hasCurrentConversation(): boolean {
     return this.chatMessages.length > 0 || this.planSteps.length > 0;
+  }
+
+  private hasCurrentExecutionCheckIn(): boolean {
+    return AiExecutionCheckInHelper.matchesStep(
+      this.lastExecutionCheckIn, this.lastCompletedStepTitle, this.lastCompletedStepProject);
+  }
+
+  @Builder
+  private executionCheckInCard() {
+    Column({ space: 10 }) {
+      Row({ space: 8 }) {
+        Text(this.hasCurrentExecutionCheckIn() ? '执行结果已记录' : '时间达标，请核验实际产出')
+          .fontSize(13).fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary')).layoutWeight(1)
+        Text('本地核验')
+          .fontSize(9).fontWeight(FontWeight.Bold).fontColor($r('app.color.accent_yellow'))
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor($r('app.color.ring_track')).borderRadius(10)
+      }.width('100%')
+      Text(`步骤：${this.lastCompletedStepTitle}`)
+        .fontSize(11).fontColor($r('app.color.text_secondary')).width('100%')
+        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+      Text('番茄计时只代表投入时间。请写下可检查的交付物，或具体说明做到哪里、被什么阻塞。')
+        .fontSize(10).lineHeight(16).fontColor($r('app.color.text_tertiary')).width('100%')
+      TextArea({
+        text: this.executionCheckInDraft,
+        placeholder: '例如：已导出 demo.mp4；完成 12/20 道题，剩余 8 道；接口 401，待确认权限'
+      })
+        .width('100%').height(76).fontSize(11)
+        .backgroundColor($r('app.color.background')).borderRadius(12)
+        .onChange((value: string) => this.executionCheckInDraft = value.substring(0, 500))
+      Row({ space: 6 }) {
+        Button('已形成交付').layoutWeight(1).height(34).fontSize(9).borderRadius(17)
+          .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+          .onClick(() => this.submitExecutionCheckIn('achieved'))
+        Button('部分完成').layoutWeight(1).height(34).fontSize(9).borderRadius(17)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.accent_yellow'))
+          .onClick(() => this.submitExecutionCheckIn('partial'))
+        Button('遇到阻塞').layoutWeight(1).height(34).fontSize(9).borderRadius(17)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_red'))
+          .onClick(() => this.submitExecutionCheckIn('blocked'))
+      }.width('100%')
+      Text(this.autoReviewEnabled ?
+        '保存后会按你的设置调用 DeepSeek 自动复盘并产生 Token 消耗' :
+        '保存仅写入本地；需要时再点击“让 Agent 复盘”')
+        .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+    }
+    .width('100%').padding(14).backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: $r('app.color.accent_yellow') }).borderRadius(16)
   }
 
   @Builder
@@ -1182,7 +1288,7 @@ export struct AiPlanner {
 
         Row({ space: 10 }) {
           Column({ space: 3 }) {
-            Text('完成步骤后自动复盘').fontSize(12).fontWeight(FontWeight.Medium)
+            Text('记录结果后自动复盘').fontSize(12).fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary')).width('100%')
             Text('默认关闭；开启后会自动调用 DeepSeek，并产生 Token 消耗')
               .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
@@ -1656,7 +1762,11 @@ export struct AiPlanner {
             this.serviceCard()
             this.contextCard()
             this.agentMemoryCard()
-            if (this.shouldShowAgentSuggestion(this.getAgentDecision())) {
+            if (this.needsReview && this.lastCompletedStepTitle.length > 0) {
+              this.executionCheckInCard()
+            }
+            if (this.shouldShowAgentSuggestion(this.getAgentDecision()) &&
+              (!this.needsReview || this.hasCurrentExecutionCheckIn())) {
               this.agentActionCard(this.getAgentDecision())
             }
             this.inputCard()

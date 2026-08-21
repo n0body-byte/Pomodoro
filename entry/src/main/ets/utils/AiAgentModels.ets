@@ -25,6 +25,14 @@ export interface AiChatMessage {
   createdAt: number;
 }
 
+export interface AiExecutionCheckIn {
+  stepTitle: string;
+  project: string;
+  outcome: 'achieved' | 'partial' | 'blocked';
+  detail: string;
+  recordedAt: number;
+}
+
 export interface AiAgentState {
   id: string;
   title: string;
@@ -34,6 +42,7 @@ export interface AiAgentState {
   updatedAt: number;
   needsReview: boolean;
   lastCompletedStepTitle: string;
+  lastCompletedStepProject?: string;
   availableMinutes?: number;
   deadline?: string;
   primaryGoal?: string;
@@ -43,6 +52,7 @@ export interface AiAgentState {
   lastExecutionReplanKey?: string;
   planSource?: string;
   previousPlan?: AiPlanSnapshot;
+  lastExecutionCheckIn?: AiExecutionCheckIn;
 }
 
 export interface AiConversationSummary {

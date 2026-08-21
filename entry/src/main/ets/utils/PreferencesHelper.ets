@@ -38,6 +38,7 @@ import {
   AiAgentState,
   AiChatMessage,
   AiConversationSummary,
+  AiExecutionCheckIn,
   AiGoalDriftInsight,
   AiPlan,
   AiPlanSnapshot,
@@ -766,6 +767,23 @@ export class PreferencesHelper {
           savedAt: typeof state.previousPlan.savedAt === 'number' ? state.previousPlan.savedAt : 0
         };
       }
+      let lastExecutionCheckIn: AiExecutionCheckIn | undefined = undefined;
+      if (state.lastExecutionCheckIn !== undefined &&
+        typeof state.lastExecutionCheckIn.stepTitle === 'string' &&
+        typeof state.lastExecutionCheckIn.project === 'string' &&
+        (state.lastExecutionCheckIn.outcome === 'achieved' ||
+          state.lastExecutionCheckIn.outcome === 'partial' ||
+          state.lastExecutionCheckIn.outcome === 'blocked') &&
+        typeof state.lastExecutionCheckIn.detail === 'string' &&
+        typeof state.lastExecutionCheckIn.recordedAt === 'number') {
+        lastExecutionCheckIn = {
+          stepTitle: state.lastExecutionCheckIn.stepTitle,
+          project: state.lastExecutionCheckIn.project,
+          outcome: state.lastExecutionCheckIn.outcome,
+          detail: state.lastExecutionCheckIn.detail,
+          recordedAt: state.lastExecutionCheckIn.recordedAt
+        };
+      }
       return {
         id: typeof state.id === 'string' && state.id.length > 0 ? state.id : `ai-${Date.now()}`,
         title: title.length > 0 ? title : '未命名对话',
@@ -777,6 +795,8 @@ export class PreferencesHelper {
         needsReview: state.needsReview === true,
         lastCompletedStepTitle: typeof state.lastCompletedStepTitle === 'string' ?
           state.lastCompletedStepTitle : '',
+        lastCompletedStepProject: typeof state.lastCompletedStepProject === 'string' ?
+          state.lastCompletedStepProject : '',
         availableMinutes: typeof state.availableMinutes === 'number' && state.availableMinutes > 0 ?
           Math.round(state.availableMinutes) : 120,
         deadline: typeof state.deadline === 'string' ? state.deadline : '',
@@ -788,7 +808,8 @@ export class PreferencesHelper {
         lastExecutionReplanKey: typeof state.lastExecutionReplanKey === 'string' ?
           state.lastExecutionReplanKey : '',
         planSource: typeof state.planSource === 'string' ? state.planSource : 'none',
-        previousPlan: previousPlan
+        previousPlan: previousPlan,
+        lastExecutionCheckIn: lastExecutionCheckIn
       };
     } catch {
       return emptyState;
@@ -922,6 +943,7 @@ export class PreferencesHelper {
       updatedAt: Date.now(),
       needsReview: true,
       lastCompletedStepTitle: task,
+      lastCompletedStepProject: project,
       availableMinutes: state.availableMinutes,
       deadline: state.deadline,
       primaryGoal: state.primaryGoal,
@@ -930,7 +952,8 @@ export class PreferencesHelper {
       lastAutoReviewAttemptTitle: state.lastAutoReviewAttemptTitle,
       lastExecutionReplanKey: state.lastExecutionReplanKey,
       planSource: state.planSource,
-      previousPlan: state.previousPlan
+      previousPlan: state.previousPlan,
+      lastExecutionCheckIn: undefined
     };
     if (isActiveConversation) {
       await PreferencesHelper.saveAiAgentState(context, updatedState);

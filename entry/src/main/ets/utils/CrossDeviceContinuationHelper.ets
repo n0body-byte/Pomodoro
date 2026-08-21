@@ -56,6 +56,7 @@ export class CrossDeviceContinuationHelper {
       updatedAt: state.updatedAt,
       needsReview: state.needsReview,
       lastCompletedStepTitle: state.lastCompletedStepTitle,
+      lastCompletedStepProject: state.lastCompletedStepProject,
       availableMinutes: state.availableMinutes,
       deadline: state.deadline,
       primaryGoal: state.primaryGoal,
@@ -64,7 +65,8 @@ export class CrossDeviceContinuationHelper {
       lastAutoReviewAttemptTitle: state.lastAutoReviewAttemptTitle,
       lastExecutionReplanKey: state.lastExecutionReplanKey,
       planSource: state.planSource,
-      previousPlan: state.previousPlan
+      previousPlan: state.previousPlan,
+      lastExecutionCheckIn: state.lastExecutionCheckIn
     };
   }
 
