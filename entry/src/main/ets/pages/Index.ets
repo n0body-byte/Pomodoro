@@ -60,6 +60,9 @@ struct Index {
   @State tagDraft: string = '';
   @State noteDraft: string = '';
   @State estimateDraft: number = 1;
+  @State showAiStepHandoff: boolean = false;
+  @State completedAiStepTitle: string = '';
+  @State nextAiStepTitle: string = '';
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
@@ -72,6 +75,8 @@ struct Index {
   private ambientPreviewTimerId: number | null = null;
   private isCompleting: boolean = false;
   private taskTrackingStartedAt: number = 0;
+  private nextAiPlanStep: AiPlanStep | undefined = undefined;
+  private nextAiConversationId: string = '';
   private tabsController: TabsController = new TabsController();
 
   async aboutToAppear(): Promise<void> {
@@ -165,6 +170,7 @@ struct Index {
     this.currentProject = this.currentProject.trim();
     this.currentTag = this.currentTag.trim();
     this.currentNote = this.currentNote.trim();
+    this.dismissAiStepHandoff();
     this.showTaskEditor = false;
     await this.loadTodayStats();
   }
@@ -191,6 +197,7 @@ struct Index {
     this.tagDraft = '';
     this.noteDraft = '';
     this.estimateDraft = 1;
+    this.dismissAiStepHandoff();
     await PreferencesHelper.saveTaskContext(this.getContext(), {
       task: '',
       project: '',
@@ -216,6 +223,7 @@ struct Index {
     this.taskTrackingStartedAt = Date.now();
     this.currentTaskSource = 'ai';
     this.currentTaskConversationId = conversationId;
+    this.dismissAiStepHandoff();
     await PreferencesHelper.saveTaskContext(this.getContext(), {
       task: this.currentTask,
       project: this.currentProject,
@@ -229,6 +237,45 @@ struct Index {
     this.currentTaskCompleted = 0;
     this.currentTabIndex = 0;
     this.tabsController.changeIndex(0);
+  }
+
+  private dismissAiStepHandoff(): void {
+    this.showAiStepHandoff = false;
+    this.completedAiStepTitle = '';
+    this.nextAiStepTitle = '';
+    this.nextAiPlanStep = undefined;
+    this.nextAiConversationId = '';
+  }
+
+  private async completeCurrentAiPlanStep(): Promise<void> {
+    const completedTitle = this.currentTask;
+    const conversationId = this.currentTaskConversationId;
+    const completion = await PreferencesHelper.markAiPlanStepCompleted(
+      this.getContext(), completedTitle, this.currentProject,
+      this.currentTaskSource, conversationId);
+    if (completion === undefined) {
+      return;
+    }
+    const nextStep = completion.nextStep;
+    this.completedAiStepTitle = completedTitle;
+    this.nextAiPlanStep = nextStep;
+    this.nextAiConversationId = conversationId;
+    this.nextAiStepTitle = nextStep === undefined ? '' : nextStep.title;
+    this.showAiStepHandoff = true;
+  }
+
+  private async applySuggestedAiStep(): Promise<void> {
+    const nextStep = this.nextAiPlanStep;
+    if (nextStep === undefined || this.nextAiConversationId.length === 0) {
+      return;
+    }
+    await this.applyAiPlanStep(nextStep, this.nextAiConversationId);
+  }
+
+  private openAiPlanner(): void {
+    this.dismissAiStepHandoff();
+    this.currentTabIndex = 1;
+    this.tabsController.changeIndex(1);
   }
 
   private openTaskEditor(): void {
@@ -428,8 +475,7 @@ struct Index {
         completedAt, 'completed');
       await this.loadTodayStats();
       if (saved && completedWorkMode && this.currentTaskCompleted >= this.estimatedPomodoros) {
-        await PreferencesHelper.markAiPlanStepCompleted(
-          this.getContext(), this.currentTask, this.currentProject);
+        await this.completeCurrentAiPlanStep();
       }
       if (completedWorkMode && previousTodayCount < this.dailyTarget && this.todayCount >= this.dailyTarget) {
         this.triggerCelebration();
@@ -577,8 +623,7 @@ struct Index {
             this.currentTaskCompleted += 1;
           }
           if (this.currentTaskCompleted >= this.estimatedPomodoros) {
-            await PreferencesHelper.markAiPlanStepCompleted(
-              this.getContext(), this.currentTask, this.currentProject);
+            await this.completeCurrentAiPlanStep();
           }
         }
       } else if (action === 'partial') {
@@ -990,6 +1035,55 @@ struct Index {
       .backgroundColor($r('app.color.surface'))
       .borderRadius(14)
       .border({ width: 1, color: $r('app.color.card_border') })
+
+      if (this.showAiStepHandoff) {
+        Row({ space: 10 }) {
+          Column({ space: 3 }) {
+            Text('AI 步骤已完成')
+              .fontSize(10)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.accent_yellow'))
+            Text(this.nextAiStepTitle.length > 0 ? `下一步：${this.nextAiStepTitle}` : '本轮计划已完成，建议让 Agent 复盘')
+              .fontSize(12)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(`已完成：${this.completedAiStepTitle}`)
+              .fontSize(9)
+              .fontColor($r('app.color.text_tertiary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+
+          Button(this.nextAiStepTitle.length > 0 ?
+            (this.isRunning ? '休息后承接' : '设为下一步') : '前往复盘')
+            .height(32)
+            .fontSize(10)
+            .borderRadius(16)
+            .backgroundColor($r('app.color.ring_track'))
+            .fontColor($r('app.color.accent_yellow'))
+            .enabled(this.nextAiStepTitle.length === 0 ||
+              (!this.isRunning && this.remainingSeconds === this.totalSeconds))
+            .opacity(this.nextAiStepTitle.length > 0 &&
+              (this.isRunning || this.remainingSeconds !== this.totalSeconds) ? 0.55 : 1)
+            .onClick(() => {
+              if (this.nextAiStepTitle.length > 0) {
+                this.applySuggestedAiStep();
+              } else {
+                this.openAiPlanner();
+              }
+            })
+        }
+        .width('100%')
+        .padding({ left: 14, right: 12, top: 10, bottom: 10 })
+        .margin({ top: 8 })
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(14)
+        .border({ width: 1, color: $r('app.color.accent_yellow') })
+      }
 
       // 环形计时区
       Column({ space: 0 }) {

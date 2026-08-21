@@ -7,6 +7,7 @@ import { AiAgentDecisionHelper } from '../main/ets/utils/AiAgentDecisionHelper';
 import { AiAgentP1Helper, AiExecutionRecord } from '../main/ets/utils/AiAgentP1Helper';
 import { LocalFallbackPlanHelper } from '../main/ets/utils/LocalFallbackPlanHelper';
 import { AiPlanQualityHelper } from '../main/ets/utils/AiPlanQualityHelper';
+import { AiPlanProgressHelper } from '../main/ets/utils/AiPlanProgressHelper';
 import { AiPlannerService } from '../main/ets/utils/AiPlannerService';
 import {
   AiExecutionInsight,
@@ -396,6 +397,30 @@ export default function localUnitTest() {
       expect(plan.steps[0].estimatedPomodoros + plan.steps[1].estimatedPomodoros +
         plan.steps[2].estimatedPomodoros).assertEqual(4);
       expect(plan.steps[2].title.indexOf('交付') >= 0).assertTrue();
+    });
+
+    it('aiPlanCompletionReturnsNextStep', 0, () => {
+      const plan: AiPlan = { summary: '完成报告', steps: [
+        { title: '整理资料', project: '报告', tag: '准备', note: '', estimatedPomodoros: 1,
+          reason: '先收集输入', completed: false },
+        { title: '撰写初稿', project: '报告', tag: '产出', note: '', estimatedPomodoros: 2,
+          reason: '形成可评审版本', completed: false }
+      ] };
+      const completion = AiPlanProgressHelper.completeStep(plan, '整理资料', '报告');
+      expect(completion.matched).assertTrue();
+      expect(completion.plan.steps[0].completed).assertTrue();
+      expect(completion.nextStep !== undefined).assertTrue();
+      if (completion.nextStep !== undefined) {
+        expect(completion.nextStep.title).assertEqual('撰写初稿');
+      }
+      expect(plan.steps[0].completed).assertFalse();
+    });
+
+    it('aiPlanCompletionRequiresExactConversation', 0, () => {
+      expect(AiPlanProgressHelper.isTrackedConversation('ai', 'conversation-1', 'conversation-1')).assertTrue();
+      expect(AiPlanProgressHelper.isTrackedConversation('manual', 'conversation-1', 'conversation-1')).assertFalse();
+      expect(AiPlanProgressHelper.isTrackedConversation('ai', 'conversation-1', 'conversation-2')).assertFalse();
+      expect(AiPlanProgressHelper.isTrackedConversation('ai', '', '')).assertFalse();
     });
   });
 }

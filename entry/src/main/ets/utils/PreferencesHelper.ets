@@ -41,6 +41,7 @@ import {
   AiPlan,
   AiPlanStep
 } from './AiAgentModels';
+import { AiPlanCompletionResult, AiPlanProgressHelper } from './AiPlanProgressHelper';
 
 export interface SessionRecord {
   id?: string;
@@ -825,39 +826,33 @@ export class PreferencesHelper {
     await prefs.flush();
   }
 
-  static async markAiPlanStepCompleted(context: Context, task: string, project: string): Promise<void> {
-    if (task.length === 0) {
-      return;
+  static async markAiPlanStepCompleted(context: Context, task: string, project: string,
+    source: string, conversationId: string): Promise<AiPlanCompletionResult | undefined> {
+    if (task.length === 0 || source !== 'ai' || conversationId.length === 0) {
+      return undefined;
     }
-    const state = await PreferencesHelper.loadAiAgentState(context);
-    let matched = false;
-    const updatedSteps: AiPlanStep[] = [];
-    for (const step of state.plan.steps) {
-      if (!matched && !step.completed && step.title === task && step.project === project) {
-        updatedSteps.push({
-          title: step.title,
-          project: step.project,
-          tag: step.tag,
-          note: step.note,
-          estimatedPomodoros: step.estimatedPomodoros,
-          reason: step.reason,
-          completed: true
-        });
-        matched = true;
-      } else {
-        updatedSteps.push(step);
+    let state = await PreferencesHelper.loadAiAgentState(context);
+    const isActiveConversation = state.id === conversationId;
+    if (!isActiveConversation) {
+      const archivedState = await PreferencesHelper.loadArchivedAiConversation(context, conversationId);
+      if (archivedState === undefined) {
+        return undefined;
       }
+      state = archivedState;
     }
-    if (!matched) {
-      return;
+    if (!AiPlanProgressHelper.isTrackedConversation(source, conversationId, state.id)) {
+      return undefined;
     }
-    const updatedPlan: AiPlan = { summary: state.plan.summary, steps: updatedSteps };
-    await PreferencesHelper.saveAiAgentState(context, {
+    const completion = AiPlanProgressHelper.completeStep(state.plan, task, project);
+    if (!completion.matched) {
+      return undefined;
+    }
+    const updatedState: AiAgentState = {
       id: state.id,
       title: state.title,
       createdAt: state.createdAt,
       messages: state.messages,
-      plan: updatedPlan,
+      plan: completion.plan,
       updatedAt: Date.now(),
       needsReview: true,
       lastCompletedStepTitle: task,
@@ -869,6 +864,12 @@ export class PreferencesHelper {
       lastAutoReviewAttemptTitle: state.lastAutoReviewAttemptTitle,
       lastExecutionReplanKey: state.lastExecutionReplanKey,
       planSource: state.planSource
-    });
+    };
+    if (isActiveConversation) {
+      await PreferencesHelper.saveAiAgentState(context, updatedState);
+    } else {
+      await PreferencesHelper.archiveAiConversation(context, updatedState);
+    }
+    return completion;
   }
 }
