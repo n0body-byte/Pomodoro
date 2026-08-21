@@ -228,7 +228,8 @@ struct Index {
   }
 
   private async applyAiPlanStep(step: AiPlanStep, conversationId: string): Promise<void> {
-    if (this.isRunning || this.remainingSeconds !== this.totalSeconds) {
+    if (!TimerPlanHelper.canHandoffAiStep(
+      this.isRunning, this.remainingSeconds, this.totalSeconds)) {
       return;
     }
     this.currentTask = step.title;
@@ -253,6 +254,20 @@ struct Index {
     this.currentTaskCompleted = 0;
     this.currentTabIndex = 0;
     this.tabsController.changeIndex(0);
+  }
+
+  private async startAiPlanStep(step: AiPlanStep, conversationId: string): Promise<void> {
+    if (!TimerPlanHelper.canHandoffAiStep(
+      this.isRunning, this.remainingSeconds, this.totalSeconds)) {
+      return;
+    }
+    if (!this.isWorkMode) {
+      this.switchToWork();
+    }
+    await this.applyAiPlanStep(step, conversationId);
+    if (this.currentTask === step.title && this.currentTaskConversationId === conversationId) {
+      this.startTimer();
+    }
   }
 
   private dismissAiStepHandoff(): void {
@@ -1173,7 +1188,8 @@ struct Index {
           active: this.currentTabIndex === 1,
           workMinutes: Math.max(1, Math.round(this.workDuration / 60)),
           breakMinutes: Math.max(1, Math.round(this.breakDuration / 60)),
-          canApplyStep: !this.isRunning && this.remainingSeconds === this.totalSeconds,
+          canApplyStep: TimerPlanHelper.canHandoffAiStep(
+            this.isRunning, this.remainingSeconds, this.totalSeconds),
           todayWorkSeconds: this.todayWorkSeconds,
           todayBreakSeconds: this.todayBreakSeconds,
           todayCompletedSessions: this.todayCount,
@@ -1184,7 +1200,9 @@ struct Index {
           currentTaskSource: this.currentTaskSource,
           currentTaskConversationId: this.currentTaskConversationId,
           onApplyStep: (step: AiPlanStep, conversationId: string) =>
-            this.applyAiPlanStep(step, conversationId)
+            this.applyAiPlanStep(step, conversationId),
+          onStartStep: (step: AiPlanStep, conversationId: string) =>
+            this.startAiPlanStep(step, conversationId)
         })
       }
       .tabBar(this.tabBarAiPlanner)

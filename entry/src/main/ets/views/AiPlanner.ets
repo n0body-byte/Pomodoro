@@ -95,6 +95,7 @@ export struct AiPlanner {
   @State requestTraces: AiRequestTrace[] = [];
   @State showRequestTraces: boolean = false;
   onApplyStep?: (step: AiPlanStep, conversationId: string) => void;
+  onStartStep?: (step: AiPlanStep, conversationId: string) => void;
 
   private examples: string[] = [
     '今晚复习两章高数并完成课后题',
@@ -713,6 +714,18 @@ export struct AiPlanner {
     }
   }
 
+  private startNextStep(): void {
+    const insight = this.getPlanInsight();
+    if (insight.nextStepIndex < 0) {
+      this.successMessage = '当前计划已经全部完成';
+      return;
+    }
+    const step = this.planSteps[insight.nextStepIndex];
+    if (step !== undefined) {
+      this.startStep(step);
+    }
+  }
+
   private async requestPlanCompression(): Promise<void> {
     const insight = this.getPlanInsight();
     const effectiveMinutes = this.getEffectiveAvailableMinutes();
@@ -1056,6 +1069,24 @@ export struct AiPlanner {
       this.onApplyStep(step, this.conversationId);
     }
     this.successMessage = `已将“${step.title}”设为当前任务`;
+  }
+
+  private startStep(step: AiPlanStep): void {
+    const quality = this.getPlanQuality(this.getPlanInsight());
+    if (!quality.canApply) {
+      this.errorMessage = `当前计划未通过质量门：${quality.description}`;
+      return;
+    }
+    if (!this.canApplyStep) {
+      this.errorMessage = '当前阶段已开始，不能切换并启动新的计划步骤';
+      return;
+    }
+    if (this.onStartStep) {
+      this.onStartStep(step, this.conversationId);
+      this.successMessage = `已将“${step.title}”设为任务并开始专注`;
+    } else {
+      this.applyStep(step);
+    }
   }
 
   private async toggleStepCompleted(stepIndex: number): Promise<void> {
@@ -1696,17 +1727,22 @@ export struct AiPlanner {
       if (insight.status !== 'completed') {
         Row({ space: 8 }) {
           Button(!quality.canApply ? '先修正计划' :
-            (this.canApplyStep ? '执行下一步' : '计时结束后执行'))
+            (this.canApplyStep ? '设为下一任务' : '计时结束后设置'))
+            .layoutWeight(1).height(36).fontSize(11).enabled(this.canApplyStep && quality.canApply)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
+            .borderRadius(18)
+            .onClick(() => this.applyNextStep())
+          Button(this.canApplyStep ? '立即开始专注' : '当前阶段进行中')
             .layoutWeight(1).height(36).fontSize(11).enabled(this.canApplyStep && quality.canApply)
             .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(18)
-            .onClick(() => this.applyNextStep())
-          if (insight.status === 'over_capacity' || insight.status === 'tight') {
-            Button(this.isLoading ? '正在重排…' : 'AI 压缩计划')
-              .layoutWeight(1).height(36).fontSize(11).enabled(!this.isLoading)
-              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_red'))
-              .borderRadius(18).onClick(() => this.requestPlanCompression())
-          }
+            .onClick(() => this.startNextStep())
         }.width('100%')
+        if (insight.status === 'over_capacity' || insight.status === 'tight') {
+          Button(this.isLoading ? '正在重排…' : 'AI 压缩计划')
+            .width('100%').height(36).fontSize(11).enabled(!this.isLoading)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_red'))
+            .borderRadius(18).onClick(() => this.requestPlanCompression())
+        }
       }
     }
     .width('100%').padding(14).backgroundColor($r('app.color.surface'))
@@ -1930,12 +1966,18 @@ export struct AiPlanner {
         Text(step.note).fontSize(12).lineHeight(18).fontColor($r('app.color.text_secondary')).width('100%')
       }
       if (!step.completed) {
-        Button(!this.getPlanQuality(this.getPlanInsight()).canApply ? '计划质检通过后可执行' :
-          (this.canApplyStep ? '设为当前专注任务' : '当前轮结束后可使用'))
-          .width('100%').height(36).fontSize(11)
-          .enabled(this.canApplyStep && this.getPlanQuality(this.getPlanInsight()).canApply)
-          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
-          .borderRadius(18).onClick(() => this.applyStep(step))
+        Row({ space: 8 }) {
+          Button(!this.getPlanQuality(this.getPlanInsight()).canApply ? '先修正计划' : '设为任务')
+            .layoutWeight(1).height(36).fontSize(10)
+            .enabled(this.canApplyStep && this.getPlanQuality(this.getPlanInsight()).canApply)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
+            .borderRadius(18).onClick(() => this.applyStep(step))
+          Button(this.canApplyStep ? '立即开始' : '阶段进行中')
+            .layoutWeight(1).height(36).fontSize(10)
+            .enabled(this.canApplyStep && this.getPlanQuality(this.getPlanInsight()).canApply)
+            .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+            .borderRadius(18).onClick(() => this.startStep(step))
+        }.width('100%')
       }
     }
     .width('100%').padding(14).backgroundColor($r('app.color.surface'))

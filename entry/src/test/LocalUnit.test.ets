@@ -124,6 +124,13 @@ export default function localUnitTest() {
       expect(TimerPlanHelper.shouldAutoStart(false, true, false)).assertFalse();
     });
 
+    it('aiStepHandoffOnlyAllowsFreshStoppedPhase', 0, () => {
+      expect(TimerPlanHelper.canHandoffAiStep(false, 1500, 1500)).assertTrue();
+      expect(TimerPlanHelper.canHandoffAiStep(true, 1500, 1500)).assertFalse();
+      expect(TimerPlanHelper.canHandoffAiStep(false, 1200, 1500)).assertFalse();
+      expect(TimerPlanHelper.canHandoffAiStep(false, 0, 0)).assertFalse();
+    });
+
     it('planInsightOnTrack', 0, () => {
       const steps: AiPlanStep[] = [
         { title: '完成主体', project: '报告', tag: '写作', note: '', estimatedPomodoros: 2,

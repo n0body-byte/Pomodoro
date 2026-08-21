@@ -13,4 +13,9 @@ export class TimerPlanHelper {
     autoStartBreak: boolean, autoStartWork: boolean): boolean {
     return completedWorkMode ? autoStartBreak : autoStartWork;
   }
+
+  static canHandoffAiStep(isRunning: boolean, remainingSeconds: number,
+    totalSeconds: number): boolean {
+    return !isRunning && totalSeconds > 0 && remainingSeconds === totalSeconds;
+  }
 }
