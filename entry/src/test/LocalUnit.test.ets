@@ -14,6 +14,7 @@ import { AiPlannerService } from '../main/ets/utils/AiPlannerService';
 import { CrossDeviceContinuationHelper } from '../main/ets/utils/CrossDeviceContinuationHelper';
 import { AiExecutionCheckInHelper } from '../main/ets/utils/AiExecutionCheckInHelper';
 import { AiRequestTraceHelper } from '../main/ets/utils/AiRequestTraceHelper';
+import { AiDeadlineHelper } from '../main/ets/utils/AiDeadlineHelper';
 import {
   AiAgentResult,
   AiAgentState,
@@ -674,6 +675,37 @@ export default function localUnitTest() {
       expect(merged.length).assertEqual(2);
       expect(merged[0].id).assertEqual('record-1');
       expect(merged[1].id).assertEqual('record-2');
+    });
+
+    it('aiDeadlineClampsAvailableMinutesToAbsoluteDeadline', 0, () => {
+      const now = new Date(2026, 7, 21, 10, 0, 0, 0).getTime();
+      const insight = AiDeadlineHelper.evaluate('2026-08-21 11:30', 180, now);
+      expect(insight.status).assertEqual('valid');
+      expect(insight.remainingMinutes).assertEqual(90);
+      expect(insight.effectiveAvailableMinutes).assertEqual(90);
+      expect(insight.normalizedDeadline).assertEqual('2026-08-21 11:30');
+    });
+
+    it('aiDeadlineNormalizesRelativeChineseTime', 0, () => {
+      const now = new Date(2026, 7, 21, 10, 0, 0, 0).getTime();
+      const insight = AiDeadlineHelper.evaluate('明天 18:00', 120, now);
+      expect(insight.status).assertEqual('valid');
+      expect(insight.normalizedDeadline).assertEqual('2026-08-22 18:00');
+      expect(insight.effectiveAvailableMinutes).assertEqual(120);
+    });
+
+    it('aiDeadlineRejectsExpiredTime', 0, () => {
+      const now = new Date(2026, 7, 21, 10, 0, 0, 0).getTime();
+      const insight = AiDeadlineHelper.evaluate('2026-08-21 09:59', 120, now);
+      expect(insight.status).assertEqual('expired');
+      expect(insight.effectiveAvailableMinutes).assertEqual(0);
+    });
+
+    it('aiDeadlineExplainsUnsupportedInput', 0, () => {
+      const now = new Date(2026, 7, 21, 10, 0, 0, 0).getTime();
+      const insight = AiDeadlineHelper.evaluate('尽快完成', 120, now);
+      expect(insight.status).assertEqual('unsupported');
+      expect(insight.description.length > 0).assertTrue();
     });
   });
 }

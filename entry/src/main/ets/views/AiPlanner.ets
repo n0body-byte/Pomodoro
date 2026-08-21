@@ -9,6 +9,7 @@ import { AiPlanQualityHelper } from '../utils/AiPlanQualityHelper';
 import { AiPlanVersionHelper } from '../utils/AiPlanVersionHelper';
 import { AiExecutionCheckInHelper } from '../utils/AiExecutionCheckInHelper';
 import { AiRequestTraceHelper } from '../utils/AiRequestTraceHelper';
+import { AiDeadlineHelper, AiDeadlineInsight } from '../utils/AiDeadlineHelper';
 import {
   AiAgentDecision,
   AiAgentMemory,
@@ -418,6 +419,32 @@ export struct AiPlanner {
     this.availableMinutes = Math.max(this.workMinutes, Math.min(1440, this.availableMinutes + delta));
   }
 
+  private getDeadlineInsight(): AiDeadlineInsight {
+    return AiDeadlineHelper.evaluate(this.deadline, this.availableMinutes);
+  }
+
+  private getEffectiveAvailableMinutes(): number {
+    return this.getDeadlineInsight().effectiveAvailableMinutes;
+  }
+
+  private prepareDeadline(): boolean {
+    const insight = this.getDeadlineInsight();
+    if (insight.status === 'unsupported' || insight.status === 'expired') {
+      this.errorMessage = insight.description;
+      return false;
+    }
+    if (insight.status === 'valid') {
+      this.deadline = insight.normalizedDeadline;
+    }
+    return true;
+  }
+
+  private setDeadlineShortcut(value: string): void {
+    const insight = AiDeadlineHelper.evaluate(value, this.availableMinutes);
+    this.deadline = insight.status === 'valid' ? insight.normalizedDeadline : value;
+    this.errorMessage = '';
+  }
+
   private formatMinutes(minutes: number): string {
     if (minutes < 60) {
       return `${minutes} 分钟`;
@@ -511,6 +538,7 @@ export struct AiPlanner {
       }
     }
     const insight = this.getPlanInsight();
+    const deadlineInsight = this.getDeadlineInsight();
     return {
       todayWorkSeconds: this.todayWorkSeconds,
       todayBreakSeconds: this.todayBreakSeconds,
@@ -525,8 +553,9 @@ export struct AiPlanner {
       workMinutes: this.workMinutes,
       breakMinutes: this.breakMinutes,
       recentSessionsSummary: recentSummary.length > 0 ? recentSummary : '暂无历史记录',
-      availableMinutes: this.availableMinutes,
-      deadline: this.deadline.trim().length > 0 ? this.deadline.trim() : '未指定',
+      availableMinutes: deadlineInsight.effectiveAvailableMinutes,
+      deadline: deadlineInsight.normalizedDeadline.length > 0 ?
+        deadlineInsight.normalizedDeadline : '未指定',
       planRequiredMinutes: insight.requiredMinutes,
       planBufferMinutes: insight.bufferMinutes,
       planProgressPercent: insight.progressPercent,
@@ -598,7 +627,7 @@ export struct AiPlanner {
     const tracksCurrentPlan = this.currentTaskSource === 'ai' &&
       this.currentTaskConversationId === this.conversationId;
     return AiPlanInsightHelper.calculate(
-      this.planSteps, this.availableMinutes, this.workMinutes, this.breakMinutes,
+      this.planSteps, this.getEffectiveAvailableMinutes(), this.workMinutes, this.breakMinutes,
       tracksCurrentPlan ? this.currentTask : '', tracksCurrentPlan ? this.currentProject : '',
       tracksCurrentPlan ? this.currentTaskCompleted : 0);
   }
@@ -613,7 +642,7 @@ export struct AiPlanner {
 
   private evaluateCandidatePlan(plan: AiPlan): AiPlanQualityInsight {
     const insight = AiPlanInsightHelper.calculate(
-      plan.steps, this.availableMinutes, this.workMinutes, this.breakMinutes);
+      plan.steps, this.getEffectiveAvailableMinutes(), this.workMinutes, this.breakMinutes);
     return AiPlanQualityHelper.evaluate(plan.steps, insight);
   }
 
@@ -686,8 +715,9 @@ export struct AiPlanner {
 
   private async requestPlanCompression(): Promise<void> {
     const insight = this.getPlanInsight();
+    const effectiveMinutes = this.getEffectiveAvailableMinutes();
     const message = `当前计划剩余 ${insight.remainingPomodoros} 个番茄，预计需要 ` +
-      `${insight.requiredMinutes} 分钟，但我现在只有 ${this.availableMinutes} 分钟。` +
+      `${insight.requiredMinutes} 分钟，但我在截止约束内只有 ${effectiveMinutes} 分钟。` +
       `请保留最有价值的可交付成果，压缩或合并后续步骤，并保留合理缓冲。`;
     await this.askAgent(message);
   }
@@ -751,11 +781,14 @@ export struct AiPlanner {
       this.successMessage = '现有计划仍可离线执行，无需覆盖';
       return;
     }
+    if (!this.prepareDeadline()) {
+      return;
+    }
     const fallbackGoal = this.resolveFallbackGoal();
     const requestText = this.lastFailedMessage.length > 0 ? this.lastFailedMessage :
       `请为“${fallbackGoal}”制定计划。`;
     const plan = LocalFallbackPlanHelper.create(
-      fallbackGoal, this.availableMinutes, this.deadline, this.workMinutes, this.breakMinutes);
+      fallbackGoal, this.getEffectiveAvailableMinutes(), this.deadline, this.workMinutes, this.breakMinutes);
     this.primaryGoal = fallbackGoal;
     this.summary = plan.summary;
     this.planSteps = plan.steps;
@@ -827,6 +860,9 @@ export struct AiPlanner {
     const normalized = message.trim();
     if (normalized.length < 2) {
       this.errorMessage = '请告诉 AI 你想规划或调整什么';
+      return false;
+    }
+    if (!this.prepareDeadline()) {
       return false;
     }
     if (this.serviceMode === 'deepseek' && this.apiKey.trim().length < 10) {
@@ -925,7 +961,8 @@ export struct AiPlanner {
         return false;
       }
       const result: AiPlanResult = await AiPlannerService.createPlan(
-        this.endpoint, normalized, this.availableMinutes, this.deadline, this.workMinutes, this.breakMinutes);
+        this.endpoint, normalized, this.getEffectiveAvailableMinutes(), this.deadline,
+        this.workMinutes, this.breakMinutes);
       if (!result.success) {
         this.errorMessage = result.errorMessage;
         this.lastFailedMessage = normalized;
@@ -962,13 +999,17 @@ export struct AiPlanner {
       this.errorMessage = readiness.question;
       return;
     }
+    if (!this.prepareDeadline()) {
+      return;
+    }
     const deadlineText = this.deadline.trim().length > 0 ? this.deadline.trim() : '未指定';
+    const effectiveMinutes = this.getEffectiveAvailableMinutes();
     const previousPrimaryGoal = this.primaryGoal;
     this.primaryGoal = this.goal.trim();
     this.goalDriftInsight = AiAgentP1Helper.emptyDrift();
     this.lastExecutionReplanKey = '';
     const message = `请制定或重新规划这个目标：${this.goal.trim()}。` +
-      `我可用 ${this.availableMinutes} 分钟，截止时间：${deadlineText}。`;
+      `我在截止约束内可用 ${effectiveMinutes} 分钟，截止时间：${deadlineText}。`;
     if (!await this.askAgent(message)) {
       this.primaryGoal = previousPrimaryGoal;
       await this.refreshAgentAnalysis();
@@ -1689,6 +1730,29 @@ export struct AiPlanner {
   }
 
   @Builder
+  private deadlineInsightCard(insight: AiDeadlineInsight) {
+    if (insight.status !== 'none') {
+      Column({ space: 4 }) {
+        Row({ space: 6 }) {
+          Text(insight.status === 'valid' ? '✓' : '!').fontSize(11).fontWeight(FontWeight.Bold)
+            .fontColor(insight.status === 'valid' ?
+              $r('app.color.primary_green') : $r('app.color.primary_red'))
+          Text(insight.title).fontSize(11).fontWeight(FontWeight.Bold)
+            .fontColor(insight.status === 'valid' ?
+              $r('app.color.primary_green') : $r('app.color.primary_red'))
+        }.width('100%')
+        Text(insight.description).fontSize(10).lineHeight(15)
+          .fontColor($r('app.color.text_secondary')).width('100%')
+        if (insight.status === 'valid') {
+          Text(`已标准化：${insight.normalizedDeadline}`)
+            .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+        }
+      }
+      .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(12)
+    }
+  }
+
+  @Builder
   private inputCard() {
     Column({ space: 12 }) {
       Column({ space: 3 }) {
@@ -1728,10 +1792,27 @@ export struct AiPlanner {
       TextInput({ text: this.deadline, placeholder: '截止时间（可选，如：周五 18:00）' })
         .width('100%').height(40).fontSize(12).fontColor($r('app.color.text_primary'))
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
-        .borderRadius(12).onChange((value: string) => this.deadline = value)
+        .borderRadius(12).onChange((value: string) => {
+          this.deadline = value;
+          this.errorMessage = '';
+        })
+      Row({ space: 8 }) {
+        Button('今晚 22:00').layoutWeight(1).height(32).fontSize(9).borderRadius(16)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+          .onClick(() => this.setDeadlineShortcut('今晚 22:00'))
+        Button('明天 18:00').layoutWeight(1).height(32).fontSize(9).borderRadius(16)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+          .onClick(() => this.setDeadlineShortcut('明天 18:00'))
+        Button('清除截止').layoutWeight(1).height(32).fontSize(9).borderRadius(16)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_tertiary'))
+          .onClick(() => this.setDeadlineShortcut(''))
+      }.width('100%')
+      this.deadlineInsightCard(this.getDeadlineInsight())
       Button(this.isLoading ? '智能体正在分析…' : '生成或重排计划')
         .width('100%').height(46).fontSize(14).fontWeight(FontWeight.Bold)
-        .enabled(!this.isLoading && this.getGoalReadiness().ready)
+        .enabled(!this.isLoading && this.getGoalReadiness().ready &&
+          this.getDeadlineInsight().status !== 'unsupported' &&
+          this.getDeadlineInsight().status !== 'expired')
         .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(23)
         .onClick(() => this.generatePlan())
     }
