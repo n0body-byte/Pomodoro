@@ -8,6 +8,7 @@ import { AiAgentP1Helper, AiExecutionRecord } from '../main/ets/utils/AiAgentP1H
 import { LocalFallbackPlanHelper } from '../main/ets/utils/LocalFallbackPlanHelper';
 import { AiPlanQualityHelper } from '../main/ets/utils/AiPlanQualityHelper';
 import { AiPlanProgressHelper } from '../main/ets/utils/AiPlanProgressHelper';
+import { AiPlanVersionHelper } from '../main/ets/utils/AiPlanVersionHelper';
 import { AiPlannerService } from '../main/ets/utils/AiPlannerService';
 import {
   AiExecutionInsight,
@@ -421,6 +422,38 @@ export default function localUnitTest() {
       expect(AiPlanProgressHelper.isTrackedConversation('manual', 'conversation-1', 'conversation-1')).assertFalse();
       expect(AiPlanProgressHelper.isTrackedConversation('ai', 'conversation-1', 'conversation-2')).assertFalse();
       expect(AiPlanProgressHelper.isTrackedConversation('ai', '', '')).assertFalse();
+    });
+
+    it('aiPlanVersionCapturesChangedExecutablePlan', 0, () => {
+      const current: AiPlan = { summary: '原计划', steps: [
+        { title: '完成初稿', project: '报告', tag: '', note: '', estimatedPomodoros: 2,
+          reason: '先形成内容', completed: false }
+      ] };
+      const next: AiPlan = { summary: '压缩计划', steps: [
+        { title: '完成最小初稿', project: '报告', tag: '', note: '', estimatedPomodoros: 1,
+          reason: '先保证交付', completed: false }
+      ] };
+      const snapshot = AiPlanVersionHelper.capture(current, next, 'ai', 123);
+      expect(snapshot !== undefined).assertTrue();
+      if (snapshot !== undefined) {
+        expect(snapshot.plan.summary).assertEqual('原计划');
+        expect(snapshot.plan.steps[0].title).assertEqual('完成初稿');
+        expect(snapshot.source).assertEqual('ai');
+        expect(snapshot.savedAt).assertEqual(123);
+        current.steps[0].title = '已被外部修改';
+        expect(snapshot.plan.steps[0].title).assertEqual('完成初稿');
+      }
+    });
+
+    it('aiPlanVersionSkipsEmptyOrUnchangedPlan', 0, () => {
+      const empty: AiPlan = { summary: '', steps: [] };
+      const plan: AiPlan = { summary: '原计划', steps: [
+        { title: '完成初稿', project: '报告', tag: '', note: '', estimatedPomodoros: 1,
+          reason: '形成交付', completed: false }
+      ] };
+      expect(AiPlanVersionHelper.capture(empty, plan, 'none', 1) === undefined).assertTrue();
+      expect(AiPlanVersionHelper.capture(plan, AiPlanVersionHelper.copyPlan(plan), 'ai', 2) ===
+        undefined).assertTrue();
     });
   });
 }

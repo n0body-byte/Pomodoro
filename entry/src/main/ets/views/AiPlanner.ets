@@ -5,6 +5,7 @@ import { AiAgentDecisionHelper } from '../utils/AiAgentDecisionHelper';
 import { AiAgentP1Helper, AiExecutionRecord } from '../utils/AiAgentP1Helper';
 import { LocalFallbackPlanHelper } from '../utils/LocalFallbackPlanHelper';
 import { AiPlanQualityHelper } from '../utils/AiPlanQualityHelper';
+import { AiPlanVersionHelper } from '../utils/AiPlanVersionHelper';
 import {
   AiAgentDecision,
   AiAgentMemory,
@@ -18,6 +19,7 @@ import {
   AiPlan,
   AiPlanInsight,
   AiPlanQualityInsight,
+  AiPlanSnapshot,
   AiPlanStep
 } from '../utils/AiAgentModels';
 
@@ -74,6 +76,10 @@ export struct AiPlanner {
   @State showAgentMemory: boolean = false;
   @State lastExecutionReplanKey: string = '';
   @State planSource: string = 'none';
+  @State previousPlanSummary: string = '';
+  @State previousPlanSteps: AiPlanStep[] = [];
+  @State previousPlanSource: string = 'none';
+  @State previousPlanSavedAt: number = 0;
   onApplyStep?: (step: AiPlanStep, conversationId: string) => void;
 
   private examples: string[] = [
@@ -157,6 +163,16 @@ export struct AiPlanner {
     this.planSource = typeof state.planSource === 'string' ? state.planSource :
       (state.plan.summary.indexOf('本地应急计划：') === 0 ? 'local' :
         (state.plan.steps.length > 0 ? 'ai' : 'none'));
+    if (state.previousPlan !== undefined && state.previousPlan.plan !== undefined &&
+      Array.isArray(state.previousPlan.plan.steps) && state.previousPlan.plan.steps.length > 0) {
+      const previousPlan = AiPlanVersionHelper.copyPlan(state.previousPlan.plan);
+      this.previousPlanSummary = previousPlan.summary;
+      this.previousPlanSteps = previousPlan.steps;
+      this.previousPlanSource = state.previousPlan.source;
+      this.previousPlanSavedAt = state.previousPlan.savedAt;
+    } else {
+      this.clearPreviousPlan();
+    }
   }
 
   private async loadConversationHistory(): Promise<void> {
@@ -200,8 +216,65 @@ export struct AiPlanner {
       goalDrift: this.goalDriftInsight,
       lastAutoReviewAttemptTitle: this.lastAutoReviewAttemptTitle,
       lastExecutionReplanKey: this.lastExecutionReplanKey,
-      planSource: this.planSource
+      planSource: this.planSource,
+      previousPlan: this.createPreviousPlanSnapshot()
     };
+  }
+
+  private createPreviousPlanSnapshot(): AiPlanSnapshot | undefined {
+    if (this.previousPlanSteps.length === 0) {
+      return undefined;
+    }
+    return {
+      plan: AiPlanVersionHelper.copyPlan({
+        summary: this.previousPlanSummary,
+        steps: this.previousPlanSteps
+      }),
+      source: this.previousPlanSource,
+      savedAt: this.previousPlanSavedAt
+    };
+  }
+
+  private clearPreviousPlan(): void {
+    this.previousPlanSummary = '';
+    this.previousPlanSteps = [];
+    this.previousPlanSource = 'none';
+    this.previousPlanSavedAt = 0;
+  }
+
+  private capturePreviousPlan(nextPlan: AiPlan): void {
+    const snapshot = AiPlanVersionHelper.capture(
+      { summary: this.summary, steps: this.planSteps }, nextPlan, this.planSource, Date.now());
+    if (snapshot === undefined) {
+      return;
+    }
+    this.previousPlanSummary = snapshot.plan.summary;
+    this.previousPlanSteps = snapshot.plan.steps;
+    this.previousPlanSource = snapshot.source;
+    this.previousPlanSavedAt = snapshot.savedAt;
+  }
+
+  private async restorePreviousPlan(): Promise<void> {
+    if (this.previousPlanSteps.length === 0 || this.isLoading) {
+      return;
+    }
+    const restored = AiPlanVersionHelper.copyPlan({
+      summary: this.previousPlanSummary,
+      steps: this.previousPlanSteps
+    });
+    const restoredSource = this.previousPlanSource;
+    this.summary = restored.summary;
+    this.planSteps = restored.steps;
+    this.planSource = restoredSource;
+    this.clearPreviousPlan();
+    this.needsReview = false;
+    this.lastFailedMessage = '';
+    this.errorMessage = '';
+    this.appendMessages('恢复 AI 调整前的计划版本',
+      '已恢复上一个执行计划；这是本地版本操作，没有调用 AI。');
+    await this.refreshAgentAnalysis();
+    await this.saveAgentState(false);
+    this.successMessage = '已恢复 AI 调整前的计划版本，未调用 AI';
   }
 
   private async saveAgentState(needsReview: boolean = this.needsReview): Promise<void> {
@@ -236,6 +309,7 @@ export struct AiPlanner {
     this.lastAutoReviewAttemptTitle = '';
     this.lastExecutionReplanKey = '';
     this.planSource = 'none';
+    this.clearPreviousPlan();
     this.successMessage = '已开始新对话';
     await this.loadConversationHistory();
   }
@@ -694,6 +768,7 @@ export struct AiPlanner {
           return false;
         }
         this.appendMessages(normalized, result.reply);
+        this.capturePreviousPlan(result.plan);
         this.summary = result.plan.summary;
         this.planSteps = result.plan.steps;
         this.planSource = 'ai';
@@ -717,6 +792,7 @@ export struct AiPlanner {
         this.lastFailedMessage = normalized;
         return false;
       }
+      this.capturePreviousPlan(result.plan);
       this.summary = result.plan.summary;
       this.planSteps = result.plan.steps;
       this.planSource = 'ai';
@@ -1406,6 +1482,30 @@ export struct AiPlanner {
   }
 
   @Builder
+  private planVersionCard() {
+    if (this.previousPlanSteps.length > 0) {
+      Row({ space: 10 }) {
+        Column({ space: 3 }) {
+          Text('已保留上个计划版本')
+            .fontSize(11).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.accent_yellow')).width('100%')
+          Text(`AI 调整前 · ${this.previousPlanSteps.length} 步 · ${
+            this.previousPlanSource === 'local' ? '本地应急' : '联网计划'}`)
+            .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+          Text('恢复不会调用 AI；恢复后当前新版本将不再保留')
+            .fontSize(9).fontColor($r('app.color.text_secondary')).width('100%')
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Button(this.canApplyStep ? '恢复上版' : '本轮结束后恢复')
+          .height(32).fontSize(10).borderRadius(16).enabled(!this.isLoading && this.canApplyStep)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.accent_yellow'))
+          .onClick(() => this.restorePreviousPlan())
+      }
+      .width('100%').padding(12).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.accent_yellow') }).borderRadius(14)
+    }
+  }
+
+  @Builder
   private planCard(step: AiPlanStep, index: number) {
     Column({ space: 9 }) {
       Row({ space: 10 }) {
@@ -1482,6 +1582,7 @@ export struct AiPlanner {
                   .fontColor($r('app.color.text_secondary')).padding(14)
                   .backgroundColor($r('app.color.surface')).borderRadius(16)
               }
+              this.planVersionCard()
               this.planInsightCard(this.getPlanInsight(), this.getPlanQuality(this.getPlanInsight()))
               ForEach(this.planSteps, (step: AiPlanStep, index: number) => {
                 this.planCard(step, index)

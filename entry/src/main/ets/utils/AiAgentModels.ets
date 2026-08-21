@@ -13,6 +13,12 @@ export interface AiPlan {
   steps: AiPlanStep[];
 }
 
+export interface AiPlanSnapshot {
+  plan: AiPlan;
+  source: string;
+  savedAt: number;
+}
+
 export interface AiChatMessage {
   role: string;
   content: string;
@@ -36,6 +42,7 @@ export interface AiAgentState {
   lastAutoReviewAttemptTitle?: string;
   lastExecutionReplanKey?: string;
   planSource?: string;
+  previousPlan?: AiPlanSnapshot;
 }
 
 export interface AiConversationSummary {

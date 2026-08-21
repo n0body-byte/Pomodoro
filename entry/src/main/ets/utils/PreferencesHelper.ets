@@ -39,6 +39,7 @@ import {
   AiConversationSummary,
   AiGoalDriftInsight,
   AiPlan,
+  AiPlanSnapshot,
   AiPlanStep
 } from './AiAgentModels';
 import { AiPlanCompletionResult, AiPlanProgressHelper } from './AiPlanProgressHelper';
@@ -701,6 +702,15 @@ export class PreferencesHelper {
             state.goalDrift.similarityPercent : 100
         };
       }
+      let previousPlan: AiPlanSnapshot | undefined = undefined;
+      if (state.previousPlan !== undefined && state.previousPlan.plan !== undefined &&
+        Array.isArray(state.previousPlan.plan.steps) && state.previousPlan.plan.steps.length > 0) {
+        previousPlan = {
+          plan: state.previousPlan.plan,
+          source: typeof state.previousPlan.source === 'string' ? state.previousPlan.source : 'none',
+          savedAt: typeof state.previousPlan.savedAt === 'number' ? state.previousPlan.savedAt : 0
+        };
+      }
       return {
         id: typeof state.id === 'string' && state.id.length > 0 ? state.id : `ai-${Date.now()}`,
         title: title.length > 0 ? title : '未命名对话',
@@ -722,7 +732,8 @@ export class PreferencesHelper {
           state.lastAutoReviewAttemptTitle : '',
         lastExecutionReplanKey: typeof state.lastExecutionReplanKey === 'string' ?
           state.lastExecutionReplanKey : '',
-        planSource: typeof state.planSource === 'string' ? state.planSource : 'none'
+        planSource: typeof state.planSource === 'string' ? state.planSource : 'none',
+        previousPlan: previousPlan
       };
     } catch {
       return emptyState;
@@ -863,7 +874,8 @@ export class PreferencesHelper {
       goalDrift: state.goalDrift,
       lastAutoReviewAttemptTitle: state.lastAutoReviewAttemptTitle,
       lastExecutionReplanKey: state.lastExecutionReplanKey,
-      planSource: state.planSource
+      planSource: state.planSource,
+      previousPlan: state.previousPlan
     };
     if (isActiveConversation) {
       await PreferencesHelper.saveAiAgentState(context, updatedState);
