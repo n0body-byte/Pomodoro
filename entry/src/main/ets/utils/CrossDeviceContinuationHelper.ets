@@ -66,7 +66,8 @@ export class CrossDeviceContinuationHelper {
       lastExecutionReplanKey: state.lastExecutionReplanKey,
       planSource: state.planSource,
       previousPlan: state.previousPlan,
-      lastExecutionCheckIn: state.lastExecutionCheckIn
+      lastExecutionCheckIn: state.lastExecutionCheckIn,
+      requestTraces: state.requestTraces
     };
   }
 

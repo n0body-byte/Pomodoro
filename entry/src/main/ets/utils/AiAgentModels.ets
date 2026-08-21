@@ -33,6 +33,20 @@ export interface AiExecutionCheckIn {
   recordedAt: number;
 }
 
+export interface AiRequestTrace {
+  id: string;
+  action: string;
+  provider: string;
+  model: string;
+  startedAt: number;
+  durationMs: number;
+  status: string;
+  statusDetail: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface AiAgentState {
   id: string;
   title: string;
@@ -53,6 +67,7 @@ export interface AiAgentState {
   planSource?: string;
   previousPlan?: AiPlanSnapshot;
   lastExecutionCheckIn?: AiExecutionCheckIn;
+  requestTraces?: AiRequestTrace[];
 }
 
 export interface AiConversationSummary {

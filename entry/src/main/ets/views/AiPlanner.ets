@@ -8,6 +8,7 @@ import { AiGoalReadinessHelper } from '../utils/AiGoalReadinessHelper';
 import { AiPlanQualityHelper } from '../utils/AiPlanQualityHelper';
 import { AiPlanVersionHelper } from '../utils/AiPlanVersionHelper';
 import { AiExecutionCheckInHelper } from '../utils/AiExecutionCheckInHelper';
+import { AiRequestTraceHelper } from '../utils/AiRequestTraceHelper';
 import {
   AiAgentDecision,
   AiAgentMemory,
@@ -24,7 +25,8 @@ import {
   AiPlanInsight,
   AiPlanQualityInsight,
   AiPlanSnapshot,
-  AiPlanStep
+  AiPlanStep,
+  AiRequestTrace
 } from '../utils/AiAgentModels';
 
 @Component
@@ -89,6 +91,8 @@ export struct AiPlanner {
   @State previousPlanSavedAt: number = 0;
   @State lastExecutionCheckIn: AiExecutionCheckIn | undefined = undefined;
   @State executionCheckInDraft: string = '';
+  @State requestTraces: AiRequestTrace[] = [];
+  @State showRequestTraces: boolean = false;
   onApplyStep?: (step: AiPlanStep, conversationId: string) => void;
 
   private examples: string[] = [
@@ -187,6 +191,7 @@ export struct AiPlanner {
     this.lastExecutionReplanKey = typeof state.lastExecutionReplanKey === 'string' ?
       state.lastExecutionReplanKey : '';
     this.lastExecutionCheckIn = state.lastExecutionCheckIn;
+    this.requestTraces = Array.isArray(state.requestTraces) ? state.requestTraces : [];
     this.executionCheckInDraft = state.needsReview && state.lastExecutionCheckIn !== undefined &&
       state.lastExecutionCheckIn.stepTitle === state.lastCompletedStepTitle &&
       (this.lastCompletedStepProject.length === 0 ||
@@ -251,7 +256,8 @@ export struct AiPlanner {
       lastExecutionReplanKey: this.lastExecutionReplanKey,
       planSource: this.planSource,
       previousPlan: this.createPreviousPlanSnapshot(),
-      lastExecutionCheckIn: this.lastExecutionCheckIn
+      lastExecutionCheckIn: this.lastExecutionCheckIn,
+      requestTraces: this.requestTraces
     };
   }
 
@@ -345,6 +351,8 @@ export struct AiPlanner {
     this.lastExecutionReplanKey = '';
     this.lastExecutionCheckIn = undefined;
     this.executionCheckInDraft = '';
+    this.requestTraces = [];
+    this.showRequestTraces = false;
     this.planSource = 'none';
     this.clearPreviousPlan();
     this.successMessage = '已开始新对话';
@@ -434,6 +442,13 @@ export struct AiPlanner {
     const minutes = date.getMinutes();
     const minuteText = minutes < 10 ? `0${minutes}` : `${minutes}`;
     return `${month}月${day}日 ${hours}:${minuteText}`;
+  }
+
+  private formatRequestDuration(durationMs: number): string {
+    if (durationMs < 1000) {
+      return `${Math.max(0, Math.round(durationMs))} ms`;
+    }
+    return `${Math.round(durationMs / 100) / 10} 秒`;
   }
 
   private async saveEndpoint(): Promise<void> {
@@ -791,6 +806,20 @@ export struct AiPlanner {
     this.chatMessages = messages;
   }
 
+  private resolveRequestAction(): string {
+    if (this.needsReview && this.lastCompletedStepTitle.length > 0) {
+      return '执行复盘';
+    }
+    return this.planSteps.length === 0 ? '生成计划' : '调整计划';
+  }
+
+  private recordRequestTrace(action: string, startedAt: number, result: AiAgentResult,
+    status: string, statusDetail: string): void {
+    const trace = AiRequestTraceHelper.create(
+      action, this.deepSeekModel, startedAt, Date.now(), result, status, statusDetail);
+    this.requestTraces = AiRequestTraceHelper.append(this.requestTraces, trace);
+  }
+
   private async askAgent(message: string): Promise<boolean> {
     if (this.isLoading) {
       return false;
@@ -815,19 +844,25 @@ export struct AiPlanner {
     this.successMessage = '';
     try {
       if (this.serviceMode === 'deepseek') {
+        const requestAction = this.resolveRequestAction();
         const focusContext = await this.buildFocusContext();
         this.goalDriftInsight = this.planSteps.length > 0 ?
           AiAgentP1Helper.detectGoalDrift(
             this.primaryGoal, normalized, { summary: this.summary, steps: this.planSteps }) :
           AiAgentP1Helper.emptyDrift();
         await this.updateAgentAnalysis(focusContext);
+        const requestStartedAt = Date.now();
         const result: AiAgentResult = await AiPlannerService.continueDeepSeekAgent(
           this.apiKey, this.deepSeekModel, normalized, this.chatMessages,
           { summary: this.summary, steps: this.planSteps }, focusContext,
           this.agentMemory, this.goalDriftInsight, this.executionInsight);
         if (!result.success) {
+          this.recordRequestTrace(requestAction, requestStartedAt, result,
+            'failed', result.errorMessage);
+          this.lastTotalTokens = result.usage.totalTokens;
           this.errorMessage = result.errorMessage;
           this.lastFailedMessage = normalized;
+          await this.saveAgentState(this.needsReview);
           return false;
         }
         let acceptedResult: AiAgentResult = result;
@@ -835,25 +870,39 @@ export struct AiPlanner {
         let repaired = false;
         this.lastTotalTokens = result.usage.totalTokens;
         if (!quality.canApply) {
+          this.recordRequestTrace(requestAction, requestStartedAt, result,
+            'quality_rejected', '返回计划未通过本地质量门，已进入一次自动修复');
+          const repairStartedAt = Date.now();
           const repairResult: AiAgentResult = await AiPlannerService.continueDeepSeekAgent(
             this.apiKey, this.deepSeekModel, quality.improvementPrompt,
             this.buildRepairHistory(normalized, result.reply), result.plan, focusContext,
             this.agentMemory, this.goalDriftInsight, this.executionInsight);
           this.lastTotalTokens += repairResult.usage.totalTokens;
           if (!repairResult.success) {
+            this.recordRequestTrace('质量门自动修复', repairStartedAt, repairResult,
+              'failed', repairResult.errorMessage);
             this.errorMessage = `AI 计划未通过质量门：${quality.description}` +
               `自动修复失败：${repairResult.errorMessage}`;
             this.lastFailedMessage = normalized;
+            await this.saveAgentState(this.needsReview);
             return false;
           }
           quality = this.evaluateCandidatePlan(repairResult.plan);
           if (!quality.canApply) {
+            this.recordRequestTrace('质量门自动修复', repairStartedAt, repairResult,
+              'quality_rejected', '修复结果仍未通过本地质量门，已停止自动重试');
             this.errorMessage = `AI 计划未通过质量门，已停止自动重试：${quality.description}`;
             this.lastFailedMessage = normalized;
+            await this.saveAgentState(this.needsReview);
             return false;
           }
+          this.recordRequestTrace('质量门自动修复', repairStartedAt, repairResult,
+            'repaired', '修复结果已通过本地质量门并采用');
           acceptedResult = repairResult;
           repaired = true;
+        } else {
+          this.recordRequestTrace(requestAction, requestStartedAt, result,
+            'accepted', '响应已通过本地质量门并采用');
         }
         this.appendMessages(normalized, acceptedResult.reply);
         this.capturePreviousPlan(acceptedResult.plan);
@@ -1032,12 +1081,72 @@ export struct AiPlanner {
   }
 
   private hasCurrentConversation(): boolean {
-    return this.chatMessages.length > 0 || this.planSteps.length > 0;
+    return this.chatMessages.length > 0 || this.planSteps.length > 0 || this.requestTraces.length > 0;
   }
 
   private hasCurrentExecutionCheckIn(): boolean {
     return AiExecutionCheckInHelper.matchesStep(
       this.lastExecutionCheckIn, this.lastCompletedStepTitle, this.lastCompletedStepProject);
+  }
+
+  @Builder
+  private requestTraceCard() {
+    if (this.requestTraces.length > 0) {
+      Column({ space: 9 }) {
+        Row({ space: 8 }) {
+          Column({ space: 2 }) {
+            Text('DeepSeek 调用记录').fontSize(13).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary')).width('100%')
+            Text('只记录模型、耗时、Token 和结果，不保存提示词或 API Key')
+              .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          Button(this.showRequestTraces ? '收起' : '详情')
+            .height(30).fontSize(9).borderRadius(15)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .onClick(() => this.showRequestTraces = !this.showRequestTraces)
+        }.width('100%')
+
+        if (this.requestTraces[0] !== undefined) {
+          Text(AiRequestTraceHelper.provesRemoteResponse(this.requestTraces[0]) ?
+            (this.requestTraces[0].totalTokens > 0 ?
+              '已收到 DeepSeek 响应；下方 Token 来自服务端 usage 字段' :
+              '已收到 DeepSeek 错误响应，但服务端未返回 Token usage') :
+            '尚未收到 DeepSeek 响应，请结合错误信息检查网络')
+            .fontSize(10).fontWeight(FontWeight.Medium)
+            .fontColor(AiRequestTraceHelper.provesRemoteResponse(this.requestTraces[0]) ?
+              $r('app.color.primary_green') : $r('app.color.accent_yellow')).width('100%')
+        }
+
+        if (this.showRequestTraces) {
+          ForEach(this.requestTraces, (trace: AiRequestTrace, index: number) => {
+            if (index < 5) {
+              Column({ space: 4 }) {
+                Row({ space: 6 }) {
+                  Text(`${trace.action} · ${AiRequestTraceHelper.statusLabel(trace.status)}`)
+                    .fontSize(11).fontWeight(FontWeight.Bold)
+                    .fontColor(trace.status === 'accepted' || trace.status === 'repaired' ?
+                      $r('app.color.primary_green') :
+                      (trace.status === 'failed' ? $r('app.color.primary_red') :
+                        $r('app.color.accent_yellow'))).layoutWeight(1)
+                  Text(this.formatConversationTime(trace.startedAt))
+                    .fontSize(9).fontColor($r('app.color.text_tertiary'))
+                }.width('100%')
+                Text(`${trace.provider} · ${trace.model} · ${this.formatRequestDuration(trace.durationMs)}`)
+                  .fontSize(9).fontColor($r('app.color.text_secondary')).width('100%')
+                Text(trace.totalTokens > 0 ?
+                  `${trace.totalTokens} tokens（输入 ${trace.promptTokens} / 输出 ${trace.completionTokens}）` :
+                  '服务端未返回 Token usage')
+                  .fontSize(9).fontColor($r('app.color.text_secondary')).width('100%')
+                Text(trace.statusDetail).fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+              }
+              .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(12)
+            }
+          }, (trace: AiRequestTrace) => trace.id)
+        }
+      }
+      .width('100%').padding(14).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(16)
+    }
   }
 
   @Builder
@@ -1760,6 +1869,7 @@ export struct AiPlanner {
         Scroll() {
           Column({ space: 12 }) {
             this.serviceCard()
+            this.requestTraceCard()
             this.contextCard()
             this.agentMemoryCard()
             if (this.needsReview && this.lastCompletedStepTitle.length > 0) {

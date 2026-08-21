@@ -42,7 +42,8 @@ import {
   AiGoalDriftInsight,
   AiPlan,
   AiPlanSnapshot,
-  AiPlanStep
+  AiPlanStep,
+  AiRequestTrace
 } from './AiAgentModels';
 import { AiPlanCompletionResult, AiPlanProgressHelper } from './AiPlanProgressHelper';
 
@@ -784,6 +785,21 @@ export class PreferencesHelper {
           recordedAt: state.lastExecutionCheckIn.recordedAt
         };
       }
+      const requestTraces: AiRequestTrace[] = [];
+      if (Array.isArray(state.requestTraces)) {
+        const maxTraceCount = Math.min(20, state.requestTraces.length);
+        for (let index = 0; index < maxTraceCount; index++) {
+          const trace = state.requestTraces[index];
+          if (trace !== undefined && typeof trace.id === 'string' &&
+            typeof trace.action === 'string' && typeof trace.provider === 'string' &&
+            typeof trace.model === 'string' && typeof trace.startedAt === 'number' &&
+            typeof trace.durationMs === 'number' && typeof trace.status === 'string' &&
+            typeof trace.statusDetail === 'string' && typeof trace.promptTokens === 'number' &&
+            typeof trace.completionTokens === 'number' && typeof trace.totalTokens === 'number') {
+            requestTraces.push(trace);
+          }
+        }
+      }
       return {
         id: typeof state.id === 'string' && state.id.length > 0 ? state.id : `ai-${Date.now()}`,
         title: title.length > 0 ? title : '未命名对话',
@@ -809,7 +825,8 @@ export class PreferencesHelper {
           state.lastExecutionReplanKey : '',
         planSource: typeof state.planSource === 'string' ? state.planSource : 'none',
         previousPlan: previousPlan,
-        lastExecutionCheckIn: lastExecutionCheckIn
+        lastExecutionCheckIn: lastExecutionCheckIn,
+        requestTraces: requestTraces
       };
     } catch {
       return emptyState;
@@ -835,7 +852,9 @@ export class PreferencesHelper {
   }
 
   static async archiveAiConversation(context: Context, state: AiAgentState): Promise<void> {
-    if (state.id.length === 0 || (state.messages.length === 0 && state.plan.steps.length === 0)) {
+    const traceCount = Array.isArray(state.requestTraces) ? state.requestTraces.length : 0;
+    if (state.id.length === 0 ||
+      (state.messages.length === 0 && state.plan.steps.length === 0 && traceCount === 0)) {
       return;
     }
     const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
@@ -953,7 +972,8 @@ export class PreferencesHelper {
       lastExecutionReplanKey: state.lastExecutionReplanKey,
       planSource: state.planSource,
       previousPlan: state.previousPlan,
-      lastExecutionCheckIn: undefined
+      lastExecutionCheckIn: undefined,
+      requestTraces: state.requestTraces
     };
     if (isActiveConversation) {
       await PreferencesHelper.saveAiAgentState(context, updatedState);

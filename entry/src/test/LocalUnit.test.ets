@@ -13,7 +13,9 @@ import { AiPlanVersionHelper } from '../main/ets/utils/AiPlanVersionHelper';
 import { AiPlannerService } from '../main/ets/utils/AiPlannerService';
 import { CrossDeviceContinuationHelper } from '../main/ets/utils/CrossDeviceContinuationHelper';
 import { AiExecutionCheckInHelper } from '../main/ets/utils/AiExecutionCheckInHelper';
+import { AiRequestTraceHelper } from '../main/ets/utils/AiRequestTraceHelper';
 import {
+  AiAgentResult,
   AiAgentState,
   AiChatMessage,
   AiExecutionInsight,
@@ -21,7 +23,8 @@ import {
   AiGoalDriftInsight,
   AiPlan,
   AiPlanInsight,
-  AiPlanStep
+  AiPlanStep,
+  AiRequestTrace
 } from '../main/ets/utils/AiAgentModels';
 
 export default function localUnitTest() {
@@ -516,6 +519,49 @@ export default function localUnitTest() {
         expect(message.indexOf('接口返回 401') >= 0).assertTrue();
         expect(message.indexOf('不要把该步骤视为已完成') >= 0).assertTrue();
       }
+    });
+
+    it('requestTraceCapturesReturnedUsage', 0, () => {
+      const result: AiAgentResult = {
+        success: true, reply: '计划完成', plan: { summary: '', steps: [] },
+        usage: { promptTokens: 120, completionTokens: 80, totalTokens: 200 }, errorMessage: ''
+      };
+      const trace = AiRequestTraceHelper.create(
+        '生成计划', 'deepseek-v4-flash', 1000, 2600, result, 'accepted', '已采用');
+      expect(trace.totalTokens).assertEqual(200);
+      expect(trace.durationMs).assertEqual(1600);
+      expect(trace.provider).assertEqual('DeepSeek');
+      expect(AiRequestTraceHelper.provesRemoteResponse(trace)).assertTrue();
+    });
+
+    it('requestTraceKeepsNewestTwentyEntries', 0, () => {
+      let traces: AiRequestTrace[] = [];
+      const result: AiAgentResult = {
+        success: false, reply: '', plan: { summary: '', steps: [] },
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, errorMessage: '网络失败'
+      };
+      for (let index = 0; index < 25; index++) {
+        const trace = AiRequestTraceHelper.create(
+          `调用${index}`, 'deepseek-v4-flash', index, index + 1, result, 'failed', '网络失败');
+        traces = AiRequestTraceHelper.append(traces, trace);
+      }
+      expect(traces.length).assertEqual(20);
+      expect(traces[0].action).assertEqual('调用24');
+    });
+
+    it('requestTraceDoesNotClaimUnconfirmedFailureAsResponse', 0, () => {
+      const result: AiAgentResult = {
+        success: false, reply: '', plan: { summary: '', steps: [] },
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        errorMessage: '无法连接 DeepSeek，请检查网络后重试'
+      };
+      const trace = AiRequestTraceHelper.create(
+        '生成计划', 'deepseek-v4-flash', 1000, 2000, result, 'failed', result.errorMessage);
+      expect(AiRequestTraceHelper.provesRemoteResponse(trace)).assertFalse();
+      const authTrace = AiRequestTraceHelper.create(
+        '生成计划', 'deepseek-v4-flash', 2000, 2200, result,
+        'failed', 'DeepSeek API Key 无效或没有访问权限');
+      expect(AiRequestTraceHelper.provesRemoteResponse(authTrace)).assertTrue();
     });
 
     it('aiPlanVersionCapturesChangedExecutablePlan', 0, () => {

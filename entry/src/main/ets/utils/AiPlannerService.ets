@@ -116,12 +116,12 @@ export class AiPlannerService {
     return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
   }
 
-  private static agentFailure(message: string): AiAgentResult {
+  private static agentFailure(message: string, usage: AiUsage = AiPlannerService.emptyUsage()): AiAgentResult {
     return {
       success: false,
       reply: '',
       plan: AiPlannerService.emptyPlan(),
-      usage: AiPlannerService.emptyUsage(),
+      usage: usage,
       errorMessage: message
     };
   }
@@ -543,16 +543,23 @@ export class AiPlannerService {
       if (typeof response.result !== 'string' || response.result.length === 0) {
         return AiPlannerService.agentFailure('DeepSeek 没有返回内容');
       }
+      let responseUsage: AiUsage = AiPlannerService.emptyUsage();
       try {
         const deepSeekResponse = JSON.parse(response.result) as DeepSeekResponse;
+        responseUsage = deepSeekResponse.usage === undefined ? AiPlannerService.emptyUsage() : {
+          promptTokens: deepSeekResponse.usage.prompt_tokens,
+          completionTokens: deepSeekResponse.usage.completion_tokens,
+          totalTokens: deepSeekResponse.usage.total_tokens
+        };
         if (!Array.isArray(deepSeekResponse.choices) || deepSeekResponse.choices.length === 0 ||
           deepSeekResponse.choices[0] === undefined || deepSeekResponse.choices[0].message === undefined ||
           typeof deepSeekResponse.choices[0].message.content !== 'string' ||
           deepSeekResponse.choices[0].message.content.length === 0) {
-          return AiPlannerService.agentFailure('DeepSeek 返回了空内容，请重新发送');
+          return AiPlannerService.agentFailure('DeepSeek 返回了空内容，请重新发送', responseUsage);
         }
         if (deepSeekResponse.choices[0].finish_reason === 'length') {
-          return AiPlannerService.agentFailure('DeepSeek 输出过长而被截断，请缩小目标或改用 V4 Flash');
+          return AiPlannerService.agentFailure(
+            'DeepSeek 输出过长而被截断，请缩小目标或改用 V4 Flash', responseUsage);
         }
         const jsonContent = AiPlannerService.extractJsonObject(deepSeekResponse.choices[0].message.content);
         const parsed = JSON.parse(jsonContent) as AiAgentResponse;
@@ -560,26 +567,22 @@ export class AiPlannerService {
         const reply = typeof parsed.reply === 'string' && parsed.reply.trim().length > 0 ?
           parsed.reply.trim() : (typeof fallbackSummary === 'string' ? fallbackSummary.trim() : '');
         if (reply.length === 0) {
-          return AiPlannerService.agentFailure('DeepSeek 回复格式不正确，请重新发送');
+          return AiPlannerService.agentFailure('DeepSeek 回复格式不正确，请重新发送', responseUsage);
         }
         const normalizedPlan = AiPlannerService.normalizeAgentPlan(parsed, currentPlan);
         if (!normalizedPlan.success) {
-          return AiPlannerService.agentFailure(normalizedPlan.errorMessage);
+          return AiPlannerService.agentFailure(normalizedPlan.errorMessage, responseUsage);
         }
-        const usage: AiUsage = deepSeekResponse.usage === undefined ? AiPlannerService.emptyUsage() : {
-          promptTokens: deepSeekResponse.usage.prompt_tokens,
-          completionTokens: deepSeekResponse.usage.completion_tokens,
-          totalTokens: deepSeekResponse.usage.total_tokens
-        };
         return {
           success: true,
           reply: reply,
           plan: normalizedPlan.plan,
-          usage: usage,
+          usage: responseUsage,
           errorMessage: ''
         };
       } catch {
-        return AiPlannerService.agentFailure('DeepSeek 返回的数据格式不正确，请重新发送');
+        return AiPlannerService.agentFailure(
+          'DeepSeek 返回的数据格式不正确，请重新发送', responseUsage);
       }
     } catch {
       return AiPlannerService.agentFailure('无法连接 DeepSeek，请检查网络后重试');
