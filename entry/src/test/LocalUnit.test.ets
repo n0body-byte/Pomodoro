@@ -151,6 +151,22 @@ export default function localUnitTest() {
       expect(insight.nextStepIndex).assertEqual(1);
     });
 
+    it('planInsightIncludesActiveStepPartialProgress', 0, () => {
+      const steps: AiPlanStep[] = [
+        { title: '完成初稿', project: '报告', tag: '', note: '', estimatedPomodoros: 3,
+          reason: '', completed: false },
+        { title: '检查交付', project: '报告', tag: '', note: '', estimatedPomodoros: 1,
+          reason: '', completed: false }
+      ];
+      const insight = AiPlanInsightHelper.calculate(
+        steps, 60, 25, 5, '完成初稿', '报告', 2);
+      expect(insight.completedPomodoros).assertEqual(2);
+      expect(insight.remainingPomodoros).assertEqual(2);
+      expect(insight.progressPercent).assertEqual(50);
+      expect(insight.requiredMinutes).assertEqual(55);
+      expect(insight.nextStepIndex).assertEqual(0);
+    });
+
     it('agentDecisionRecoversFailedActionFirst', 0, () => {
       const insight: AiPlanInsight = AiPlanInsightHelper.calculate([], 120, 25, 5);
       const decision = AiAgentDecisionHelper.decide(insight, false, false, true, true, true, true, false);

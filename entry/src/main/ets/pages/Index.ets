@@ -52,6 +52,7 @@ struct Index {
   @State estimatedPomodoros: number = 1;
   @State currentTaskCompleted: number = 0;
   @State currentTaskSource: string = 'manual';
+  @State currentTaskConversationId: string = '';
   @State showTaskEditor: boolean = false;
   @State showEndEarlyDialog: boolean = false;
   @State taskDraft: string = '';
@@ -133,6 +134,8 @@ struct Index {
     this.taskTrackingStartedAt = typeof taskContext.trackingStartedAt === 'number' ?
       Math.max(0, taskContext.trackingStartedAt) : 0;
     this.currentTaskSource = taskContext.source === 'ai' ? 'ai' : 'manual';
+    this.currentTaskConversationId = typeof taskContext.agentConversationId === 'string' ?
+      taskContext.agentConversationId : '';
   }
 
   private async saveTaskContext(): Promise<void> {
@@ -141,6 +144,7 @@ struct Index {
     if (nextTask !== this.currentTask || nextProject !== this.currentProject) {
       this.taskTrackingStartedAt = Date.now();
       this.currentTaskSource = 'manual';
+      this.currentTaskConversationId = '';
     }
     this.currentTask = nextTask;
     this.currentProject = nextProject;
@@ -154,7 +158,8 @@ struct Index {
       note: this.currentNote.trim(),
       estimatedPomodoros: this.estimatedPomodoros,
       trackingStartedAt: this.taskTrackingStartedAt,
-      source: this.currentTaskSource === 'ai' ? 'ai' : 'manual'
+      source: this.currentTaskSource === 'ai' ? 'ai' : 'manual',
+      agentConversationId: this.currentTaskConversationId
     });
     this.currentTask = this.currentTask.trim();
     this.currentProject = this.currentProject.trim();
@@ -179,6 +184,7 @@ struct Index {
     this.estimatedPomodoros = 1;
     this.currentTaskCompleted = 0;
     this.currentTaskSource = 'manual';
+    this.currentTaskConversationId = '';
     this.taskTrackingStartedAt = 0;
     this.taskDraft = '';
     this.projectDraft = '';
@@ -192,12 +198,13 @@ struct Index {
       note: '',
       estimatedPomodoros: 1,
       trackingStartedAt: 0,
-      source: 'manual'
+      source: 'manual',
+      agentConversationId: ''
     });
     this.showTaskEditor = false;
   }
 
-  private async applyAiPlanStep(step: AiPlanStep): Promise<void> {
+  private async applyAiPlanStep(step: AiPlanStep, conversationId: string): Promise<void> {
     if (this.isRunning || this.remainingSeconds !== this.totalSeconds) {
       return;
     }
@@ -208,6 +215,7 @@ struct Index {
     this.estimatedPomodoros = step.estimatedPomodoros;
     this.taskTrackingStartedAt = Date.now();
     this.currentTaskSource = 'ai';
+    this.currentTaskConversationId = conversationId;
     await PreferencesHelper.saveTaskContext(this.getContext(), {
       task: this.currentTask,
       project: this.currentProject,
@@ -215,7 +223,8 @@ struct Index {
       note: this.currentNote,
       estimatedPomodoros: this.estimatedPomodoros,
       trackingStartedAt: this.taskTrackingStartedAt,
-      source: 'ai'
+      source: 'ai',
+      agentConversationId: conversationId
     });
     this.currentTaskCompleted = 0;
     this.currentTabIndex = 0;
@@ -1088,7 +1097,10 @@ struct Index {
           currentTask: this.currentTask,
           currentProject: this.currentProject,
           currentTaskCompleted: this.currentTaskCompleted,
-          onApplyStep: (step: AiPlanStep) => this.applyAiPlanStep(step)
+          currentTaskSource: this.currentTaskSource,
+          currentTaskConversationId: this.currentTaskConversationId,
+          onApplyStep: (step: AiPlanStep, conversationId: string) =>
+            this.applyAiPlanStep(step, conversationId)
         })
       }
       .tabBar(this.tabBarAiPlanner)

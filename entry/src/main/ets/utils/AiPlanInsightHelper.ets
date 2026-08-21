@@ -9,13 +9,15 @@ export class AiPlanInsightHelper {
   }
 
   static calculate(steps: AiPlanStep[], availableMinutes: number,
-    workMinutes: number, breakMinutes: number): AiPlanInsight {
+    workMinutes: number, breakMinutes: number, activeTask: string = '',
+    activeProject: string = '', activeTaskCompleted: number = 0): AiPlanInsight {
     const normalizedAvailable = Math.max(0, Math.round(availableMinutes));
     const normalizedWork = AiPlanInsightHelper.normalizePositive(workMinutes, 25);
     const normalizedBreak = AiPlanInsightHelper.normalizePositive(breakMinutes, 5);
     let totalPomodoros = 0;
     let completedPomodoros = 0;
     let nextStepIndex = -1;
+    let partialProgressApplied = false;
 
     for (let index = 0; index < steps.length; index++) {
       const step = steps[index];
@@ -24,8 +26,17 @@ export class AiPlanInsightHelper {
         totalPomodoros += estimate;
         if (step.completed) {
           completedPomodoros += estimate;
-        } else if (nextStepIndex < 0) {
-          nextStepIndex = index;
+        } else {
+          let partialPomodoros = 0;
+          if (!partialProgressApplied && activeTask.length > 0 &&
+            step.title === activeTask && step.project === activeProject) {
+            partialPomodoros = Math.max(0, Math.min(estimate, Math.round(activeTaskCompleted)));
+            completedPomodoros += partialPomodoros;
+            partialProgressApplied = true;
+          }
+          if (partialPomodoros < estimate && nextStepIndex < 0) {
+            nextStepIndex = index;
+          }
         }
       }
     }

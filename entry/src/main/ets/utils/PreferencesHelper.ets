@@ -66,6 +66,7 @@ export interface TaskContext {
   estimatedPomodoros: number;
   trackingStartedAt?: number;
   source?: 'manual' | 'ai';
+  agentConversationId?: string;
 }
 
 export interface TimerState {
@@ -594,7 +595,7 @@ export class PreferencesHelper {
   static async loadTaskContext(context: Context): Promise<TaskContext> {
     const defaultValue: TaskContext = {
       task: '', project: '', tag: '', note: '', estimatedPomodoros: 1,
-      trackingStartedAt: 0, source: 'manual'
+      trackingStartedAt: 0, source: 'manual', agentConversationId: ''
     };
     try {
       const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);

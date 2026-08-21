@@ -32,6 +32,8 @@ export struct AiPlanner {
   @Prop currentTask: string = '';
   @Prop currentProject: string = '';
   @Prop currentTaskCompleted: number = 0;
+  @Prop currentTaskSource: string = 'manual';
+  @Prop currentTaskConversationId: string = '';
   @State serviceMode: string = 'deepseek';
   @State apiKey: string = '';
   @State deepSeekModel: string = 'deepseek-v4-flash';
@@ -67,7 +69,7 @@ export struct AiPlanner {
   @State showAgentMemory: boolean = false;
   @State lastExecutionReplanKey: string = '';
   @State planSource: string = 'none';
-  onApplyStep?: (step: AiPlanStep) => void;
+  onApplyStep?: (step: AiPlanStep, conversationId: string) => void;
 
   private examples: string[] = [
     '今晚复习两章高数并完成课后题',
@@ -445,8 +447,33 @@ export struct AiPlanner {
   }
 
   private getPlanInsight(): AiPlanInsight {
+    const tracksCurrentPlan = this.currentTaskSource === 'ai' &&
+      this.currentTaskConversationId === this.conversationId;
     return AiPlanInsightHelper.calculate(
-      this.planSteps, this.availableMinutes, this.workMinutes, this.breakMinutes);
+      this.planSteps, this.availableMinutes, this.workMinutes, this.breakMinutes,
+      tracksCurrentPlan ? this.currentTask : '', tracksCurrentPlan ? this.currentProject : '',
+      tracksCurrentPlan ? this.currentTaskCompleted : 0);
+  }
+
+  private getTrackedStepPomodoros(step: AiPlanStep): number {
+    if (step.completed) {
+      return Math.max(1, step.estimatedPomodoros);
+    }
+    if (this.currentTaskSource !== 'ai' || this.currentTaskConversationId !== this.conversationId ||
+      step.title !== this.currentTask || step.project !== this.currentProject) {
+      return 0;
+    }
+    return Math.max(0, Math.min(Math.max(1, step.estimatedPomodoros), this.currentTaskCompleted));
+  }
+
+  private formatStepProgress(step: AiPlanStep): string {
+    const trackedPomodoros = this.getTrackedStepPomodoros(step);
+    const estimatedPomodoros = Math.max(1, step.estimatedPomodoros);
+    const progressText = trackedPomodoros > 0 ? `${trackedPomodoros}/${estimatedPomodoros}` :
+      `${estimatedPomodoros}`;
+    const runningText = trackedPomodoros > 0 && !step.completed ? ' · 执行中' : '';
+    const projectText = step.project.length > 0 ? ` · ${step.project}` : '';
+    return `${progressText} 个番茄${runningText}${projectText}`;
   }
 
   private getAgentDecision(): AiAgentDecision {
@@ -711,7 +738,7 @@ export struct AiPlanner {
       return;
     }
     if (this.onApplyStep) {
-      this.onApplyStep(step);
+      this.onApplyStep(step, this.conversationId);
     }
     this.successMessage = `已将“${step.title}”设为当前任务`;
   }
@@ -1318,7 +1345,7 @@ export struct AiPlanner {
             .fontColor(step.completed ? $r('app.color.text_tertiary') : $r('app.color.text_primary'))
             .decoration({ type: step.completed ? TextDecorationType.LineThrough : TextDecorationType.None })
             .width('100%')
-          Text(`${step.estimatedPomodoros} 个番茄${step.project.length > 0 ? ` · ${step.project}` : ''}`)
+          Text(this.formatStepProgress(step))
             .fontSize(10).fontColor($r('app.color.primary_green')).width('100%')
         }.layoutWeight(1)
       }.width('100%')
