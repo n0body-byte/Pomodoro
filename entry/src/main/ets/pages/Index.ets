@@ -14,6 +14,12 @@ import { Insights } from '../views/Insights';
 import { AiPlanner } from '../views/AiPlanner';
 import { AiPlanStep } from '../utils/AiAgentModels';
 import {
+  WearableAdjustmentRequest,
+  WearableHealthHelper,
+  WearableRecoveryAction,
+  WearableRecoveryResolution
+} from '../utils/WearableHealthHelper';
+import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET,
@@ -21,6 +27,7 @@ import {
 } from '../common/Constants';
 
 const MAX_RECOVERED_PHASES = 32;
+const WEARABLE_RECOVERY_SECONDS = 2 * 60;
 
 @Entry
 @Component
@@ -66,7 +73,10 @@ struct Index {
   @State showAiStepHandoff: boolean = false;
   @State completedAiStepTitle: string = '';
   @State showWearableLab: boolean = false;
-  @State wearableAdjustmentPrompt: string = '';
+  @State wearableAdjustment: WearableAdjustmentRequest = WearableHealthHelper.emptyAdjustmentRequest();
+  @State wearableRecoveryActive: boolean = false;
+  @State wearableRecoveryAwaitingDecision: boolean = false;
+  @State wearableRecoveryRemainingSeconds: number = WEARABLE_RECOVERY_SECONDS;
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
@@ -81,6 +91,8 @@ struct Index {
   private taskTrackingStartedAt: number = 0;
   private isRestoringContinuation: boolean = false;
   private tabsController: TabsController = new TabsController();
+  private wearableRecoveryTimerId: number | null = null;
+  private wearableRecoveryDeadlineAt: number = 0;
 
   async aboutToAppear(): Promise<void> {
     const ctx = this.getContext();
@@ -107,6 +119,7 @@ struct Index {
   aboutToDisappear(): void {
     this.saveCurrentState();
     this.clearTimerInterval();
+    this.clearWearableRecoveryTimer();
     this.cancelScheduledAutoStart();
     NotificationHelper.cancelOngoing();
     AmbientHelper.stop();
@@ -302,25 +315,95 @@ struct Index {
   }
 
   private closeWearableLab(): void {
+    if (this.wearableRecoveryActive) {
+      return;
+    }
     this.showWearableLab = false;
   }
 
-  private pauseForWearableRecovery(): void {
-    if (this.isRunning) {
-      this.stopTimer();
-      this.saveCurrentState();
+  private clearWearableRecoveryTimer(): void {
+    if (this.wearableRecoveryTimerId !== null) {
+      clearInterval(this.wearableRecoveryTimerId);
+      this.wearableRecoveryTimerId = null;
     }
   }
 
-  private openAgentWithWearableSuggestion(prompt: string): void {
-    this.wearableAdjustmentPrompt = prompt;
+  private refreshWearableRecovery(): void {
+    if (!this.wearableRecoveryActive || this.wearableRecoveryAwaitingDecision ||
+      this.wearableRecoveryDeadlineAt <= 0) {
+      return;
+    }
+    this.wearableRecoveryRemainingSeconds = TimerHelper.calculateRemainingSeconds(
+      this.wearableRecoveryDeadlineAt, Date.now());
+    if (this.wearableRecoveryRemainingSeconds <= 0) {
+      this.wearableRecoveryAwaitingDecision = true;
+      this.clearWearableRecoveryTimer();
+    }
+  }
+
+  private startWearableRecoveryTimer(): void {
+    this.clearWearableRecoveryTimer();
+    this.wearableRecoveryTimerId = setInterval(() => {
+      this.refreshWearableRecovery();
+    }, 1000);
+  }
+
+  private startWearableRecovery(): void {
+    if (!this.isRunning || !this.isWorkMode || this.wearableRecoveryActive) {
+      return;
+    }
+    this.stopTimer();
+    this.wearableRecoveryActive = true;
+    this.wearableRecoveryAwaitingDecision = false;
+    this.wearableRecoveryRemainingSeconds = WEARABLE_RECOVERY_SECONDS;
+    this.wearableRecoveryDeadlineAt = Date.now() + WEARABLE_RECOVERY_SECONDS * 1000;
+    this.startWearableRecoveryTimer();
+    this.saveCurrentState();
+  }
+
+  private completeWearableRecoveryDemo(): void {
+    if (!this.wearableRecoveryActive) {
+      return;
+    }
+    this.wearableRecoveryRemainingSeconds = 0;
+    this.wearableRecoveryAwaitingDecision = true;
+    this.wearableRecoveryDeadlineAt = 0;
+    this.clearWearableRecoveryTimer();
+  }
+
+  private async finishWearableRecovery(action: WearableRecoveryAction): Promise<void> {
+    if (!this.wearableRecoveryActive || !this.wearableRecoveryAwaitingDecision) {
+      return;
+    }
+    this.clearWearableRecoveryTimer();
+    this.wearableRecoveryActive = false;
+    this.wearableRecoveryAwaitingDecision = false;
+    this.wearableRecoveryRemainingSeconds = WEARABLE_RECOVERY_SECONDS;
+    this.wearableRecoveryDeadlineAt = 0;
+    const resolution: WearableRecoveryResolution = WearableHealthHelper.resolveRecoveryAction(
+      action, this.remainingSeconds, this.totalSeconds);
+    if (resolution.shouldFinish) {
+      this.showWearableLab = false;
+      await this.finishEarly('partial');
+      return;
+    }
+    this.remainingSeconds = resolution.remainingSeconds;
+    this.totalSeconds = resolution.totalSeconds;
+    this.updateProgress();
+    if (resolution.shouldResume) {
+      this.startTimer();
+    }
+  }
+
+  private openAgentWithWearableSuggestion(request: WearableAdjustmentRequest): void {
+    this.wearableAdjustment = request;
     this.showWearableLab = false;
     this.currentTabIndex = 1;
     this.tabsController.changeIndex(1);
   }
 
   private consumeWearableSuggestion(): void {
-    this.wearableAdjustmentPrompt = '';
+    this.wearableAdjustment = WearableHealthHelper.emptyAdjustmentRequest();
   }
 
   private skipFromWearable(): void {
@@ -1234,8 +1317,8 @@ struct Index {
           currentTaskCompleted: this.currentTaskCompleted,
           currentTaskSource: this.currentTaskSource,
           currentTaskConversationId: this.currentTaskConversationId,
-          wearableSuggestion: this.wearableAdjustmentPrompt,
-          onWearableSuggestionConsumed: () => this.consumeWearableSuggestion(),
+          wearableAdjustment: this.wearableAdjustment,
+          onWearableAdjustmentConsumed: () => this.consumeWearableSuggestion(),
           onApplyStep: (step: AiPlanStep, conversationId: string) =>
             this.applyAiPlanStep(step, conversationId),
           onStartStep: (step: AiPlanStep, conversationId: string) =>
@@ -1319,11 +1402,20 @@ struct Index {
         isRunning: this.isRunning,
         isWorkMode: this.isWorkMode,
         currentTask: this.currentTask,
+        recoveryActive: this.wearableRecoveryActive,
+        recoveryAwaitingDecision: this.wearableRecoveryAwaitingDecision,
+        recoveryRemainingSeconds: this.wearableRecoveryRemainingSeconds,
+        recoveryTotalSeconds: WEARABLE_RECOVERY_SECONDS,
         onClose: () => this.closeWearableLab(),
         onStartPause: () => this.onStartPause(),
         onSkip: () => this.skipFromWearable(),
-        onPauseForRecovery: () => this.pauseForWearableRecovery(),
-        onSendToAgent: (prompt: string) => this.openAgentWithWearableSuggestion(prompt)
+        onStartRecovery: () => this.startWearableRecovery(),
+        onCompleteRecoveryDemo: () => this.completeWearableRecoveryDemo(),
+        onFinishRecovery: (action: WearableRecoveryAction) => {
+          this.finishWearableRecovery(action);
+        },
+        onSendToAgent: (request: WearableAdjustmentRequest) =>
+          this.openAgentWithWearableSuggestion(request)
       })
     }
     }

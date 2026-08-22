@@ -9,6 +9,7 @@ import { AiPlanQualityHelper } from '../utils/AiPlanQualityHelper';
 import { AiPlanVersionHelper } from '../utils/AiPlanVersionHelper';
 import { AiExecutionCheckInHelper } from '../utils/AiExecutionCheckInHelper';
 import { AiRequestTraceHelper } from '../utils/AiRequestTraceHelper';
+import { WearableAdjustmentRequest, WearableHealthHelper } from '../utils/WearableHealthHelper';
 import { AiDeadlineHelper, AiDeadlineInsight } from '../utils/AiDeadlineHelper';
 import {
   AiTokenBudgetHelper,
@@ -52,7 +53,8 @@ export struct AiPlanner {
   @Prop currentTaskCompleted: number = 0;
   @Prop currentTaskSource: string = 'manual';
   @Prop currentTaskConversationId: string = '';
-  @Prop @Watch('onWearableSuggestionChange') wearableSuggestion: string = '';
+  @Prop @Watch('onWearableAdjustmentChange') wearableAdjustment: WearableAdjustmentRequest =
+    WearableHealthHelper.emptyAdjustmentRequest();
   @State serviceMode: string = 'deepseek';
   @State apiKey: string = '';
   @State deepSeekModel: string = 'deepseek-v4-flash';
@@ -102,9 +104,11 @@ export struct AiPlanner {
   @State showRequestTraces: boolean = false;
   @State tokenBudget: number = DEFAULT_AI_TOKEN_BUDGET;
   @State consumedTokens: number = 0;
+  @State pendingWearableAdjustment: WearableAdjustmentRequest =
+    WearableHealthHelper.emptyAdjustmentRequest();
   onApplyStep?: (step: AiPlanStep, conversationId: string) => void;
   onStartStep?: (step: AiPlanStep, conversationId: string) => void;
-  onWearableSuggestionConsumed?: () => void;
+  onWearableAdjustmentConsumed?: () => void;
 
   private examples: string[] = [
     '今晚复习两章高数并完成课后题',
@@ -113,21 +117,42 @@ export struct AiPlanner {
   ];
   private isRestoringContinuation: boolean = false;
 
-  private onWearableSuggestionChange(): void {
-    const suggestion = this.wearableSuggestion.trim();
-    if (suggestion.length === 0) {
+  private onWearableAdjustmentChange(): void {
+    if (this.wearableAdjustment.id.length === 0) {
       return;
     }
+    this.pendingWearableAdjustment = {
+      id: this.wearableAdjustment.id,
+      createdAt: this.wearableAdjustment.createdAt,
+      currentTask: this.wearableAdjustment.currentTask,
+      recommendationTitle: this.wearableAdjustment.recommendationTitle,
+      summary: this.wearableAdjustment.summary,
+      allowedActions: this.wearableAdjustment.allowedActions,
+      protectedRules: this.wearableAdjustment.protectedRules
+    };
+    this.successMessage = '已接收穿戴端调整请求，请先检查允许动作与保护规则';
+  }
+
+  private clearWearableAdjustment(): void {
+    this.pendingWearableAdjustment = WearableHealthHelper.emptyAdjustmentRequest();
+    if (this.onWearableAdjustmentConsumed) {
+      this.onWearableAdjustmentConsumed();
+    }
+  }
+
+  private confirmWearableAdjustment(): void {
+    if (this.pendingWearableAdjustment.id.length === 0) {
+      return;
+    }
+    const prompt = WearableHealthHelper.buildAgentPrompt(this.pendingWearableAdjustment);
     if (this.planSteps.length > 0) {
-      this.followUp = suggestion;
-      this.successMessage = '已接收穿戴端摘要，请确认后发送给 Agent';
+      this.followUp = prompt;
+      this.successMessage = '约束已预填到“继续调整”，确认内容后点击发送';
     } else {
-      this.goal = suggestion;
-      this.successMessage = '已接收穿戴端摘要，请补充目标或直接生成计划';
+      this.goal = prompt;
+      this.successMessage = '约束已预填到目标输入框，确认内容后点击生成计划';
     }
-    if (this.onWearableSuggestionConsumed) {
-      this.onWearableSuggestionConsumed();
-    }
+    this.clearWearableAdjustment();
   }
 
   async aboutToAppear(): Promise<void> {
@@ -137,6 +162,7 @@ export struct AiPlanner {
     await this.loadConversationHistory();
     await this.refreshAgentAnalysis();
     await this.tryAutoReview();
+    this.onWearableAdjustmentChange();
     this.showServiceSettings = this.apiKey.length === 0;
   }
 
@@ -146,6 +172,7 @@ export struct AiPlanner {
       await this.loadConversationHistory();
       await this.refreshAgentAnalysis();
       await this.tryAutoReview();
+      this.onWearableAdjustmentChange();
     }
   }
 
@@ -1894,6 +1921,54 @@ export struct AiPlanner {
   }
 
   @Builder
+  private wearableAdjustmentCard() {
+    if (this.pendingWearableAdjustment.id.length > 0) {
+      Column({ space: 9 }) {
+        Row({ space: 7 }) {
+          Text('穿戴端请求调整').fontSize(14).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+          Blank()
+          Text('待确认').fontSize(9).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.accent_yellow'))
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor($r('app.color.ring_track')).borderRadius(10)
+        }.width('100%')
+        Text(this.pendingWearableAdjustment.recommendationTitle)
+          .fontSize(12).fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.primary_green')).width('100%')
+        Text(this.pendingWearableAdjustment.summary)
+          .fontSize(10).lineHeight(15).fontColor($r('app.color.text_secondary')).width('100%')
+        Column({ space: 4 }) {
+          Text('允许动作').fontSize(10).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          Text(this.pendingWearableAdjustment.allowedActions.join(' · '))
+            .fontSize(9).lineHeight(14).fontColor($r('app.color.text_secondary')).width('100%')
+          Text('保护规则').fontSize(10).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          Text(this.pendingWearableAdjustment.protectedRules.join(' · '))
+            .fontSize(9).lineHeight(14).fontColor($r('app.color.primary_red')).width('100%')
+        }
+        .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(12)
+        Row({ space: 8 }) {
+          Button('忽略').layoutWeight(1).height(36).fontSize(10).borderRadius(18)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .onClick(() => {
+              this.successMessage = '已忽略本次穿戴端调整请求';
+              this.clearWearableAdjustment();
+            })
+          Button('确认并预填').layoutWeight(1).height(36).fontSize(10).fontWeight(FontWeight.Bold)
+            .borderRadius(18).backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+            .onClick(() => this.confirmWearableAdjustment())
+        }.width('100%')
+        Text('确认只会预填请求，不会自动调用 AI，也不会直接修改当前计划。')
+          .fontSize(9).lineHeight(14).fontColor($r('app.color.text_tertiary')).width('100%')
+      }
+      .width('100%').padding(14).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.accent_yellow') }).borderRadius(16)
+    }
+  }
+
+  @Builder
   private inputCard() {
     Column({ space: 12 }) {
       Column({ space: 3 }) {
@@ -2105,6 +2180,7 @@ export struct AiPlanner {
         (!this.needsReview || this.hasCurrentExecutionCheckIn())) {
         this.agentActionCard(this.getAgentDecision())
       }
+      this.wearableAdjustmentCard()
       this.inputCard()
     }.width('100%')
   }

@@ -17,6 +17,7 @@ import { AiRequestTraceHelper } from '../main/ets/utils/AiRequestTraceHelper';
 import { AiDeadlineHelper } from '../main/ets/utils/AiDeadlineHelper';
 import { AiTokenBudgetHelper } from '../main/ets/utils/AiTokenBudgetHelper';
 import {
+  HeartRateSample,
   MockHeartRateProvider,
   WearableHealthHelper,
   WearableHealthSnapshot
@@ -71,39 +72,100 @@ export default function localUnitTest() {
     it('wearableStressSuggestsRecovery', 0, () => {
       const provider = new MockHeartRateProvider();
       provider.setScenario('stress');
-      const snapshot = provider.nextSnapshot(0, 1000);
+      let samples: HeartRateSample[] = [];
+      let snapshot = WearableHealthHelper.emptySnapshot(75);
+      for (let index = 0; index < 8; index++) {
+        samples = WearableHealthHelper.appendSample(samples, provider.nextSample(index, 1000 + index));
+        snapshot = WearableHealthHelper.summarize(samples, 75, snapshot.highLoadSeconds, 30);
+      }
       const recommendation = WearableHealthHelper.evaluate(snapshot);
       expect(recommendation.level).assertEqual('recover');
       expect(recommendation.canAdjustPlan).assertTrue();
+      expect(snapshot.highLoadSeconds).assertEqual(120);
+      expect(snapshot.confidencePercent).assertEqual(100);
     });
 
     it('wearableMovementDoesNotAutoTreatAsStress', 0, () => {
       const provider = new MockHeartRateProvider();
       provider.setScenario('movement');
-      const recommendation = WearableHealthHelper.evaluate(provider.nextSnapshot(0, 1000));
+      let samples: HeartRateSample[] = [];
+      let snapshot = WearableHealthHelper.emptySnapshot(75);
+      for (let index = 0; index < 8; index++) {
+        samples = WearableHealthHelper.appendSample(samples, provider.nextSample(index, 1000 + index));
+        snapshot = WearableHealthHelper.summarize(samples, 75, snapshot.highLoadSeconds, 30);
+      }
+      const recommendation = WearableHealthHelper.evaluate(snapshot);
       expect(recommendation.level).assertEqual('observe');
       expect(recommendation.description.indexOf('活动') >= 0).assertTrue();
+      expect(snapshot.highLoadSeconds).assertEqual(0);
     });
 
     it('wearableDisconnectedBlocksPlanAdjustment', 0, () => {
       const provider = new MockHeartRateProvider();
       provider.setScenario('disconnected');
-      const recommendation = WearableHealthHelper.evaluate(provider.nextSnapshot(0, 1000));
+      const sample = provider.nextSample(0, 1000);
+      const snapshot = WearableHealthHelper.summarize([sample], 75, 0, 30);
+      const recommendation = WearableHealthHelper.evaluate(snapshot);
       expect(recommendation.level).assertEqual('unavailable');
       expect(recommendation.canAdjustPlan).assertFalse();
+    });
+
+    it('wearableBaselineCalibrationRequiresStableWindow', 0, () => {
+      const provider = new MockHeartRateProvider();
+      provider.setScenario('steady');
+      let samples: HeartRateSample[] = [];
+      let snapshot = WearableHealthHelper.emptySnapshot(75);
+      for (let index = 0; index < 6; index++) {
+        samples = WearableHealthHelper.appendSample(samples, provider.nextSample(index, 1000 + index));
+        snapshot = WearableHealthHelper.summarize(samples, 75, snapshot.highLoadSeconds, 1);
+      }
+      const result = WearableHealthHelper.calibrateBaseline(snapshot, 75);
+      expect(result.success).assertTrue();
+      expect(result.baselineBpm >= 74 && result.baselineBpm <= 78).assertTrue();
+    });
+
+    it('wearableBaselineCalibrationRejectsMotion', 0, () => {
+      const snapshot: WearableHealthSnapshot = {
+        bpm: 110, medianBpm: 108, baselineBpm: 75, trendBpm: 2,
+        highLoadSeconds: 0, sampleCount: 8, confidencePercent: 100, quality: 'good',
+        hasMotion: true, isWorn: true, sampledAt: 1000
+      };
+      const result = WearableHealthHelper.calibrateBaseline(snapshot, 75);
+      expect(result.success).assertFalse();
+      expect(result.message.indexOf('活动') >= 0).assertTrue();
     });
 
     it('wearableAgentPromptContainsOnlyAggregateSummary', 0, () => {
       const snapshot: WearableHealthSnapshot = {
         bpm: 106, medianBpm: 103, baselineBpm: 75, trendBpm: 11,
-        highLoadSeconds: 150, sampleCount: 30, quality: 'good',
+        highLoadSeconds: 150, sampleCount: 8, confidencePercent: 100, quality: 'good',
         hasMotion: false, isWorn: true, sampledAt: 1000
       };
       const recommendation = WearableHealthHelper.evaluate(snapshot);
-      const prompt = WearableHealthHelper.buildAgentPrompt(snapshot, recommendation, '完成技术方案');
-      expect(prompt.indexOf('窗口心率中位数 103 BPM') >= 0).assertTrue();
-      expect(prompt.indexOf('不要作医学判断') >= 0).assertTrue();
+      const request = WearableHealthHelper.createAdjustmentRequest(
+        snapshot, recommendation, '完成技术方案', 2000);
+      const prompt = WearableHealthHelper.buildAgentPrompt(request);
+      expect(prompt.indexOf('窗口中位数 103 BPM') >= 0).assertTrue();
+      expect(prompt.indexOf('不得进行医学判断') >= 0).assertTrue();
+      expect(request.allowedActions.length).assertEqual(5);
+      expect(request.protectedRules.length).assertEqual(3);
       expect(prompt.indexOf('106') < 0).assertTrue();
+    });
+
+    it('wearableRecoveryResumePreservesFocusTimer', 0, () => {
+      const resolution = WearableHealthHelper.resolveRecoveryAction('resume', 1200, 1500);
+      expect(resolution.remainingSeconds).assertEqual(1200);
+      expect(resolution.totalSeconds).assertEqual(1500);
+      expect(resolution.shouldResume).assertTrue();
+      expect(resolution.shouldFinish).assertFalse();
+    });
+
+    it('wearableRecoveryShortenPreservesElapsedTime', 0, () => {
+      const resolution = WearableHealthHelper.resolveRecoveryAction('shorten', 1200, 1500);
+      expect(resolution.remainingSeconds).assertEqual(900);
+      expect(resolution.totalSeconds).assertEqual(1200);
+      expect(resolution.totalSeconds - resolution.remainingSeconds).assertEqual(300);
+      expect(resolution.shouldResume).assertTrue();
     });
 
     it('completedWorkRecordCompatibility', 0, () => {

@@ -1,10 +1,18 @@
+import { PreferencesHelper } from '../utils/PreferencesHelper';
 import {
+  HeartRateSample,
   HeartRateScenario,
   MockHeartRateProvider,
+  WearableAdjustmentRequest,
+  WearableCalibrationResult,
   WearableHealthHelper,
   WearableHealthSnapshot,
-  WearableRecommendation
+  WearableRecommendation,
+  WearableRecoveryAction
 } from '../utils/WearableHealthHelper';
+
+const DEMO_SAMPLE_SPAN_SECONDS = 30;
+const MAX_WINDOW_SAMPLES = 12;
 
 @Component
 export struct WearableLab {
@@ -13,21 +21,33 @@ export struct WearableLab {
   @Prop isRunning: boolean = false;
   @Prop isWorkMode: boolean = true;
   @Prop currentTask: string = '';
+  @Prop recoveryActive: boolean = false;
+  @Prop recoveryAwaitingDecision: boolean = false;
+  @Prop recoveryRemainingSeconds: number = 120;
+  @Prop recoveryTotalSeconds: number = 120;
   @State scenario: HeartRateScenario = 'steady';
+  @State baselineBpm: number = 75;
+  @State calibrationMessage: string = '';
   @State snapshot: WearableHealthSnapshot = WearableHealthHelper.emptySnapshot();
   @State recommendation: WearableRecommendation = WearableHealthHelper.evaluate(
     WearableHealthHelper.emptySnapshot());
   onClose?: () => void;
   onStartPause?: () => void;
   onSkip?: () => void;
-  onPauseForRecovery?: () => void;
-  onSendToAgent?: (prompt: string) => void;
+  onStartRecovery?: () => void;
+  onCompleteRecoveryDemo?: () => void;
+  onFinishRecovery?: (action: WearableRecoveryAction) => void;
+  onSendToAgent?: (request: WearableAdjustmentRequest) => void;
 
   private provider: MockHeartRateProvider = new MockHeartRateProvider();
   private simulationTimerId: number | null = null;
   private tick: number = 0;
+  private highLoadSeconds: number = 0;
+  private samples: HeartRateSample[] = [];
 
-  aboutToAppear(): void {
+  async aboutToAppear(): Promise<void> {
+    this.baselineBpm = await PreferencesHelper.loadWearableBaseline(this.getContext());
+    this.snapshot = WearableHealthHelper.emptySnapshot(this.baselineBpm);
     this.provider.setScenario(this.scenario);
     this.refreshSnapshot();
     this.simulationTimerId = setInterval(() => {
@@ -43,16 +63,42 @@ export struct WearableLab {
     }
   }
 
+  private getContext(): Context {
+    return this.getUIContext().getHostContext()!;
+  }
+
   private refreshSnapshot(): void {
-    this.snapshot = this.provider.nextSnapshot(this.tick, Date.now());
+    const sample = this.provider.nextSample(this.tick, Date.now());
+    this.samples = WearableHealthHelper.appendSample(this.samples, sample, MAX_WINDOW_SAMPLES);
+    this.snapshot = WearableHealthHelper.summarize(
+      this.samples, this.baselineBpm, this.highLoadSeconds, DEMO_SAMPLE_SPAN_SECONDS);
+    this.highLoadSeconds = this.snapshot.highLoadSeconds;
     this.recommendation = WearableHealthHelper.evaluate(this.snapshot);
   }
 
   private selectScenario(scenario: HeartRateScenario): void {
     this.scenario = scenario;
     this.tick = 0;
+    this.samples = [];
+    this.highLoadSeconds = 0;
+    this.calibrationMessage = '';
     this.provider.setScenario(scenario);
     this.refreshSnapshot();
+  }
+
+  private async calibrateBaseline(): Promise<void> {
+    const result: WearableCalibrationResult = WearableHealthHelper.calibrateBaseline(
+      this.snapshot, this.baselineBpm);
+    this.calibrationMessage = result.message;
+    if (!result.success) {
+      return;
+    }
+    this.baselineBpm = result.baselineBpm;
+    this.highLoadSeconds = 0;
+    this.snapshot = WearableHealthHelper.summarize(
+      this.samples, this.baselineBpm, 0, DEMO_SAMPLE_SPAN_SECONDS);
+    this.recommendation = WearableHealthHelper.evaluate(this.snapshot);
+    await PreferencesHelper.saveWearableBaseline(this.getContext(), this.baselineBpm);
   }
 
   private formatSeconds(seconds: number): string {
@@ -66,8 +112,15 @@ export struct WearableLab {
     if (!this.recommendation.canAdjustPlan || !this.onSendToAgent) {
       return;
     }
-    this.onSendToAgent(WearableHealthHelper.buildAgentPrompt(
-      this.snapshot, this.recommendation, this.currentTask));
+    const request = WearableHealthHelper.createAdjustmentRequest(
+      this.snapshot, this.recommendation, this.currentTask, Date.now());
+    this.onSendToAgent(request);
+  }
+
+  private finishRecovery(action: WearableRecoveryAction): void {
+    if (this.onFinishRecovery) {
+      this.onFinishRecovery(action);
+    }
   }
 
   @Builder
@@ -77,6 +130,7 @@ export struct WearableLab {
       .height(34)
       .fontSize(10)
       .borderRadius(17)
+      .enabled(!this.recoveryActive)
       .backgroundColor(this.scenario === value ?
         $r('app.color.primary_green') : $r('app.color.ring_track'))
       .fontColor(this.scenario === value ? Color.Black : $r('app.color.text_secondary'))
@@ -87,15 +141,19 @@ export struct WearableLab {
   private watchPreview() {
     Stack({ alignContent: Alignment.Center }) {
       Column({ space: 5 }) {
-        Text(this.isWorkMode ? '专注中' : '休息中')
+        Text(this.recoveryActive ? '恢复中' : (this.isWorkMode ? '专注中' : '休息中'))
           .fontSize(11)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.isWorkMode ? '#FF789F' : '#75E58D')
-        Text(this.formatSeconds(this.remainingSeconds))
+          .fontColor(this.recoveryActive ? '#75E58D' : (this.isWorkMode ? '#FF789F' : '#75E58D'))
+        Text(this.formatSeconds(this.recoveryActive ?
+          this.recoveryRemainingSeconds : this.remainingSeconds))
           .fontSize(34)
           .fontWeight(FontWeight.Bold)
           .fontColor(Color.White)
-        Text(this.currentTask.length > 0 ? this.currentTask : '尚未设置任务')
+        Text(this.recoveryActive ?
+          (this.recoveryAwaitingDecision ? '请选择如何继续原计划' :
+            (Math.floor(this.recoveryRemainingSeconds / 4) % 2 === 0 ? '缓慢吸气' : '缓慢呼气')) :
+          (this.currentTask.length > 0 ? this.currentTask : '尚未设置任务'))
           .width(150)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -114,8 +172,64 @@ export struct WearableLab {
     .height(210)
     .backgroundColor('#111113')
     .borderRadius(105)
-    .border({ width: 5, color: '#424247' })
+    .border({ width: 5, color: this.recoveryActive ? '#75E58D' : '#424247' })
     .shadow({ radius: 18, color: '#55000000', offsetY: 6 })
+  }
+
+  @Builder
+  private timerControls() {
+    if (this.recoveryActive) {
+      Column({ space: 9 }) {
+        Text(this.recoveryAwaitingDecision ? '恢复完成，原专注倒计时仍保持不变' :
+          '手机端原专注倒计时已冻结，恢复结束后再由你决定')
+          .fontSize(10).lineHeight(15).fontColor($r('app.color.text_secondary')).width('100%')
+        if (this.recoveryAwaitingDecision) {
+          Row({ space: 6 }) {
+            Button('继续原计划').layoutWeight(1).height(36).fontSize(9).borderRadius(18)
+              .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+              .onClick(() => this.finishRecovery('resume'))
+            Button('缩短 5 分钟').layoutWeight(1).height(36).fontSize(9).borderRadius(18)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.finishRecovery('shorten'))
+            Button('结束并记录').layoutWeight(1).height(36).fontSize(9).borderRadius(18)
+              .backgroundColor($r('app.color.primary_red')).fontColor(Color.White)
+              .onClick(() => this.finishRecovery('end'))
+          }.width('100%')
+        } else {
+          Button('演示：立即完成两分钟恢复')
+            .width('100%').height(38).fontSize(11).borderRadius(19)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
+            .onClick(() => {
+              if (this.onCompleteRecoveryDemo) {
+                this.onCompleteRecoveryDemo();
+              }
+            })
+        }
+      }
+      .width('100%').padding(12).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.primary_green') }).borderRadius(14)
+    } else {
+      Row({ space: 8 }) {
+        Button(this.isRunning ? '暂停' : '开始')
+          .layoutWeight(1).height(38).fontSize(12).borderRadius(19)
+          .backgroundColor($r('app.color.primary_red')).fontColor(Color.White)
+          .onClick(() => {
+            if (this.onStartPause) {
+              this.onStartPause();
+            }
+          })
+        Button('跳过阶段')
+          .layoutWeight(1).height(38).fontSize(12).borderRadius(19)
+          .enabled(this.isRunning)
+          .backgroundColor($r('app.color.ring_track'))
+          .fontColor($r('app.color.text_secondary'))
+          .onClick(() => {
+            if (this.onSkip) {
+              this.onSkip();
+            }
+          })
+      }.width('100%')
+    }
   }
 
   build() {
@@ -126,15 +240,15 @@ export struct WearableLab {
             Text('穿戴协同实验室')
               .fontSize(20).fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary')).width('100%')
-            Text('无真机开发模式 · 聚合数据不会自动调用 AI')
+            Text('无真机开发模式 · 滑动窗口与恢复状态机复用正式链路')
               .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
           }.layoutWeight(1)
-          Button('关闭')
-            .height(30).fontSize(10).borderRadius(15)
+          Button(this.recoveryActive ? '恢复进行中' : '关闭')
+            .height(30).fontSize(10).borderRadius(15).enabled(!this.recoveryActive)
             .backgroundColor($r('app.color.ring_track'))
             .fontColor($r('app.color.text_secondary'))
             .onClick(() => {
-              if (this.onClose) {
+              if (!this.recoveryActive && this.onClose) {
                 this.onClose();
               }
             })
@@ -143,34 +257,14 @@ export struct WearableLab {
         Scroll() {
           Column({ space: 14 }) {
             this.watchPreview()
-
-            Row({ space: 8 }) {
-              Button(this.isRunning ? '暂停' : '开始')
-                .layoutWeight(1).height(38).fontSize(12).borderRadius(19)
-                .backgroundColor($r('app.color.primary_red')).fontColor(Color.White)
-                .onClick(() => {
-                  if (this.onStartPause) {
-                    this.onStartPause();
-                  }
-                })
-              Button('跳过阶段')
-                .layoutWeight(1).height(38).fontSize(12).borderRadius(19)
-                .enabled(this.isRunning)
-                .backgroundColor($r('app.color.ring_track'))
-                .fontColor($r('app.color.text_secondary'))
-                .onClick(() => {
-                  if (this.onSkip) {
-                    this.onSkip();
-                  }
-                })
-            }.width('100%')
+            this.timerControls()
 
             Column({ space: 8 }) {
               Row() {
                 Text('模拟数据源').fontSize(14).fontWeight(FontWeight.Bold)
                   .fontColor($r('app.color.text_primary'))
                 Blank()
-                Text(WearableHealthHelper.scenarioLabel(this.scenario))
+                Text(`${WearableHealthHelper.scenarioLabel(this.scenario)} · 演示加速 ×30`)
                   .fontSize(10).fontColor($r('app.color.primary_green'))
               }.width('100%')
               Row({ space: 6 }) {
@@ -181,7 +275,20 @@ export struct WearableLab {
                 this.scenarioButton('运动干扰', 'movement')
                 this.scenarioButton('设备断连', 'disconnected')
               }.width('100%')
-              Text('场景数据为演示数据，但规则判断、隐私过滤和 Agent 入口均复用正式链路。')
+              Row({ space: 8 }) {
+                Column({ space: 2 }) {
+                  Text(`个人基线 ${this.baselineBpm} BPM`).fontSize(11).fontWeight(FontWeight.Bold)
+                    .fontColor($r('app.color.text_primary')).width('100%')
+                  Text(this.calibrationMessage.length > 0 ? this.calibrationMessage :
+                    '平稳佩戴并积累 5 个样本后可校准')
+                    .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+                }.layoutWeight(1)
+                Button('校准基线').height(32).fontSize(9).borderRadius(16)
+                  .enabled(!this.recoveryActive)
+                  .backgroundColor($r('app.color.surface')).fontColor($r('app.color.primary_green'))
+                  .onClick(() => this.calibrateBaseline())
+              }.width('100%')
+              Text('每秒生成一个样本；演示时每个样本代表 30 秒，以便快速验证持续高负荷判断。')
                 .fontSize(9).lineHeight(14).fontColor($r('app.color.text_tertiary')).width('100%')
             }
             .width('100%').padding(13).backgroundColor($r('app.color.ring_track')).borderRadius(14)
@@ -199,20 +306,22 @@ export struct WearableLab {
               }.width('100%')
               Text(this.recommendation.description)
                 .fontSize(10).lineHeight(15).fontColor($r('app.color.text_secondary')).width('100%')
-              Text(`窗口中位数 ${this.snapshot.medianBpm || '--'} BPM · 基线 ${this.snapshot.baselineBpm} BPM · 高负荷 ${this.snapshot.highLoadSeconds} 秒`)
+              Text(`窗口中位数 ${this.snapshot.medianBpm || '--'} BPM · 基线 ${this.snapshot.baselineBpm} BPM · ` +
+                `高负荷 ${this.snapshot.highLoadSeconds} 秒 · 置信度 ${this.snapshot.confidencePercent}%`)
                 .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
 
-              if (this.recommendation.level === 'recover' && this.isRunning && this.isWorkMode) {
-                Button('先暂停当前计时')
+              if (this.recommendation.level === 'recover' && this.isRunning &&
+                this.isWorkMode && !this.recoveryActive) {
+                Button('进入两分钟恢复')
                   .width('100%').height(36).fontSize(11).borderRadius(18)
                   .backgroundColor($r('app.color.primary_red')).fontColor(Color.White)
                   .onClick(() => {
-                    if (this.onPauseForRecovery) {
-                      this.onPauseForRecovery();
+                    if (this.onStartRecovery) {
+                      this.onStartRecovery();
                     }
                   })
               }
-              if (this.recommendation.canAdjustPlan) {
+              if (this.recommendation.canAdjustPlan && !this.recoveryActive) {
                 Button(this.recommendation.actionLabel)
                   .width('100%').height(38).fontSize(11).fontWeight(FontWeight.Bold).borderRadius(19)
                   .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
@@ -223,7 +332,7 @@ export struct WearableLab {
             .border({ width: 1, color: this.recommendation.level === 'recover' ?
               $r('app.color.primary_red') : $r('app.color.card_border') }).borderRadius(14)
 
-            Text('隐私保护：正式接入后仅向手机和 Agent 提供窗口中位数、趋势、持续时间等摘要，不上传逐秒心率。此功能不用于医学诊断。')
+            Text('隐私保护：正式接入后仅保存个人基线，并向手机和 Agent 提供窗口中位数、趋势、持续时间等摘要；不上传逐秒心率。此功能不用于医学诊断。')
               .fontSize(9).lineHeight(14).fontColor($r('app.color.text_tertiary')).width('100%')
           }
           .width('100%')

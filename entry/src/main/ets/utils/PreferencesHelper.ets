@@ -26,6 +26,7 @@ import {
   PREF_KEY_AI_AUTO_REVIEW,
   PREF_KEY_CONTINUATION_TRANSFER_ID,
   PREF_KEY_CONTINUATION_TRANSFERRED_AT,
+  PREF_KEY_WEARABLE_BASELINE,
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET,
@@ -192,6 +193,23 @@ export class PreferencesHelper {
       return [];
     } catch {
       return [];
+    }
+  }
+
+  static async saveWearableBaseline(context: Context, bpm: number): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    const normalized = Math.max(45, Math.min(120, Math.round(bpm)));
+    await prefs.put(PREF_KEY_WEARABLE_BASELINE, normalized);
+    await prefs.flush();
+  }
+
+  static async loadWearableBaseline(context: Context): Promise<number> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      const value = await prefs.get(PREF_KEY_WEARABLE_BASELINE, 75) as number;
+      return Math.max(45, Math.min(120, Math.round(value)));
+    } catch {
+      return 75;
     }
   }
 

@@ -30,6 +30,7 @@ export const PREF_KEY_AI_CONVERSATION_PREFIX = 'aiConversation_';
 export const PREF_KEY_AI_AUTO_REVIEW = 'aiAutoReview';
 export const PREF_KEY_CONTINUATION_TRANSFER_ID = 'continuationTransferId';
 export const PREF_KEY_CONTINUATION_TRANSFERRED_AT = 'continuationTransferredAt';
+export const PREF_KEY_WEARABLE_BASELINE = 'wearableBaselineBpm';
 
 export const DEFAULT_LONG_BREAK_SECONDS = 15 * 60;
 export const DEFAULT_LONG_BREAK_INTERVAL = 4;
