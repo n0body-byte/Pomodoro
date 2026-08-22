@@ -72,7 +72,14 @@ export class CrossDeviceContinuationHelper {
       lastExecutionCheckIn: state.lastExecutionCheckIn,
       requestTraces: state.requestTraces,
       tokenBudget: state.tokenBudget,
-      consumedTokens: state.consumedTokens
+      consumedTokens: state.consumedTokens,
+      pendingPlan: state.pendingPlan,
+      pendingPlanReply: state.pendingPlanReply,
+      pendingPlanRequest: state.pendingPlanRequest,
+      pendingPlanSource: state.pendingPlanSource,
+      pendingPlanCreatedAt: state.pendingPlanCreatedAt,
+      pendingPrimaryGoal: state.pendingPrimaryGoal,
+      pendingPlanSelections: state.pendingPlanSelections
     };
   }
 
@@ -90,7 +97,12 @@ export class CrossDeviceContinuationHelper {
       project: record.project === undefined ? undefined : record.project.substring(0, 80),
       tag: record.tag === undefined ? undefined : record.tag.substring(0, 40),
       note: record.note === undefined ? undefined : record.note.substring(0, 300),
-      source: record.source
+      source: record.source,
+      focusRating: record.focusRating,
+      energyRating: record.energyRating,
+      interruptionReason: record.interruptionReason,
+      outcomeNote: record.outcomeNote === undefined ? undefined : record.outcomeNote.substring(0, 300),
+      reflectedAt: record.reflectedAt
     };
   }
 

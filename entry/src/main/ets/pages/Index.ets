@@ -3,7 +3,7 @@ import { CircularProgress } from '../components/CircularProgress';
 import { TimerControls } from '../components/TimerControls';
 import { CelebrationOverlay } from '../components/CelebrationOverlay';
 import { WearableLab } from '../components/WearableLab';
-import { PreferencesHelper, TaskContext } from '../utils/PreferencesHelper';
+import { PreferencesHelper, SessionFeedback, TaskContext } from '../utils/PreferencesHelper';
 import { SoundHelper } from '../utils/SoundHelper';
 import { AmbientHelper } from '../utils/AmbientHelper';
 import { NotificationHelper } from '../utils/NotificationHelper';
@@ -77,6 +77,15 @@ struct Index {
   @State wearableRecoveryActive: boolean = false;
   @State wearableRecoveryAwaitingDecision: boolean = false;
   @State wearableRecoveryRemainingSeconds: number = WEARABLE_RECOVERY_SECONDS;
+  @State immersiveMode: boolean = false;
+  @State showSessionFeedback: boolean = false;
+  @State feedbackFocusRating: number = 3;
+  @State feedbackEnergyRating: number = 3;
+  @State feedbackInterruptionReason: string = '无';
+  @State feedbackOutcomeDraft: string = '';
+  @State feedbackRecordCompletedAt: number = 0;
+  @State feedbackDurationSeconds: number = 0;
+  @State feedbackWasCompleted: boolean = true;
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
@@ -93,6 +102,8 @@ struct Index {
   private tabsController: TabsController = new TabsController();
   private wearableRecoveryTimerId: number | null = null;
   private wearableRecoveryDeadlineAt: number = 0;
+  private feedbackReasons: string[] = ['无', '通知消息', '环境打断', '任务卡住', '身体不适'];
+  private ratingValues: number[] = [1, 2, 3, 4, 5];
 
   async aboutToAppear(): Promise<void> {
     const ctx = this.getContext();
@@ -599,10 +610,6 @@ struct Index {
       this.switchToWork();
     }
 
-    if (TimerPlanHelper.shouldAutoStart(completedWorkMode, this.autoStartBreak, this.autoStartWork)) {
-      this.scheduleAutoStart();
-    }
-
     try {
       const saved = await this.persistPhaseRecord(completedWorkMode, completedDuration, completedDuration,
         completedAt, 'completed');
@@ -612,6 +619,12 @@ struct Index {
       }
       if (completedWorkMode && previousTodayCount < this.dailyTarget && this.todayCount >= this.dailyTarget) {
         this.triggerCelebration();
+      }
+      if (saved && completedWorkMode) {
+        this.openSessionFeedback(completedAt, completedDuration, true);
+      } else if (TimerPlanHelper.shouldAutoStart(
+        completedWorkMode, this.autoStartBreak, this.autoStartWork)) {
+        this.scheduleAutoStart();
       }
       await this.saveCurrentState();
     } finally {
@@ -648,6 +661,46 @@ struct Index {
     } catch {
       // 单次记录失败不阻塞计时状态切换。
       return false;
+    }
+  }
+
+  private openSessionFeedback(completedAt: number, durationSeconds: number,
+    wasCompleted: boolean): void {
+    this.feedbackRecordCompletedAt = completedAt;
+    this.feedbackDurationSeconds = durationSeconds;
+    this.feedbackWasCompleted = wasCompleted;
+    this.feedbackFocusRating = 3;
+    this.feedbackEnergyRating = 3;
+    this.feedbackInterruptionReason = '无';
+    this.feedbackOutcomeDraft = '';
+    this.showSessionFeedback = true;
+  }
+
+  private continueAfterSessionFeedback(): void {
+    this.showSessionFeedback = false;
+    this.feedbackRecordCompletedAt = 0;
+    if (!this.isWorkMode && this.autoStartBreak && !this.isRunning) {
+      this.scheduleAutoStart();
+    }
+  }
+
+  private async submitSessionFeedback(): Promise<void> {
+    if (this.feedbackRecordCompletedAt <= 0) {
+      this.continueAfterSessionFeedback();
+      return;
+    }
+    const feedback: SessionFeedback = {
+      focusRating: this.feedbackFocusRating,
+      energyRating: this.feedbackEnergyRating,
+      interruptionReason: this.feedbackInterruptionReason,
+      outcomeNote: this.feedbackOutcomeDraft,
+      reflectedAt: Date.now()
+    };
+    try {
+      await PreferencesHelper.saveSessionFeedback(
+        this.getContext(), this.feedbackRecordCompletedAt, feedback);
+    } finally {
+      this.continueAfterSessionFeedback();
     }
   }
 
@@ -741,15 +794,20 @@ struct Index {
     this.isCompleting = true;
     const plannedSeconds = this.totalSeconds;
     const actualSeconds = Math.max(0, plannedSeconds - this.remainingSeconds);
+    const completedAt = Date.now();
     const previousTodayCount = this.todayCount;
+    let savedForFeedback = false;
+    let feedbackSeconds = 0;
     this.showEndEarlyDialog = false;
     try {
       if (action === 'completed') {
         this.completedSessions += 1;
         // “按完成计算”代表将本轮视为完整番茄，统计时计入全部计划时长。
         const saved = await this.persistPhaseRecord(
-          true, plannedSeconds, plannedSeconds, Date.now(), 'completed');
+          true, plannedSeconds, plannedSeconds, completedAt, 'completed');
         if (saved) {
+          savedForFeedback = true;
+          feedbackSeconds = plannedSeconds;
           this.todayWorkSeconds += plannedSeconds;
           this.todayCount += 1;
           if (this.currentTask.length > 0) {
@@ -761,8 +819,10 @@ struct Index {
         }
       } else if (action === 'partial') {
         const saved = await this.persistPhaseRecord(
-          true, actualSeconds, plannedSeconds, Date.now(), 'abandoned');
+          true, actualSeconds, plannedSeconds, completedAt, 'abandoned');
         if (saved) {
+          savedForFeedback = true;
+          feedbackSeconds = actualSeconds;
           this.todayWorkSeconds += actualSeconds;
         }
       }
@@ -770,7 +830,9 @@ struct Index {
         this.playSelectedSound();
       }
       this.switchToBreak();
-      if (this.autoStartBreak) {
+      if (savedForFeedback) {
+        this.openSessionFeedback(completedAt, feedbackSeconds, action === 'completed');
+      } else if (this.autoStartBreak) {
         this.scheduleAutoStart();
       }
       if (action === 'completed' && previousTodayCount < this.dailyTarget && this.todayCount >= this.dailyTarget) {
@@ -1088,6 +1150,155 @@ struct Index {
   }
 
   @Builder
+  sessionFeedbackOverlay() {
+    if (this.showSessionFeedback) {
+      Column() {
+        Scroll() {
+          Column({ space: 14 }) {
+            Row() {
+              Column({ space: 3 }) {
+                Text(this.feedbackWasCompleted ? '本轮完成得怎么样？' : '记录这次部分专注')
+                  .fontSize(20).fontWeight(FontWeight.Bold)
+                  .fontColor($r('app.color.text_primary')).width('100%')
+                Text(`${Math.max(1, Math.round(this.feedbackDurationSeconds / 60))} 分钟 · ` +
+                  `${this.currentTask.length > 0 ? this.currentTask : '未命名任务'}`)
+                  .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
+              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+              Text('复盘').fontSize(9).fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.primary_green'))
+                .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+                .backgroundColor($r('app.color.ring_track')).borderRadius(11)
+            }.width('100%')
+
+            Column({ space: 8 }) {
+              Text(`专注程度 · ${this.feedbackFocusRating}/5`).fontSize(12).fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary')).width('100%')
+              Row({ space: 8 }) {
+                ForEach(this.ratingValues, (value: number) => {
+                  Button(`${value}`).layoutWeight(1).height(36).fontSize(11).borderRadius(18).padding(0)
+                    .backgroundColor(value === this.feedbackFocusRating ?
+                      $r('app.color.primary_green') : $r('app.color.ring_track'))
+                    .fontColor(value === this.feedbackFocusRating ? Color.Black :
+                      $r('app.color.text_secondary'))
+                    .onClick(() => this.feedbackFocusRating = value)
+                }, (value: number) => `focus-${value}`)
+              }.width('100%')
+            }.width('100%')
+
+            Column({ space: 8 }) {
+              Text(`当前精力 · ${this.feedbackEnergyRating}/5`).fontSize(12).fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary')).width('100%')
+              Row({ space: 8 }) {
+                ForEach(this.ratingValues, (value: number) => {
+                  Button(`${value}`).layoutWeight(1).height(36).fontSize(11).borderRadius(18).padding(0)
+                    .backgroundColor(value === this.feedbackEnergyRating ?
+                      $r('app.color.primary_green') : $r('app.color.ring_track'))
+                    .fontColor(value === this.feedbackEnergyRating ? Color.Black :
+                      $r('app.color.text_secondary'))
+                    .onClick(() => this.feedbackEnergyRating = value)
+                }, (value: number) => `energy-${value}`)
+              }.width('100%')
+            }.width('100%')
+
+            Column({ space: 8 }) {
+              Text('主要打断').fontSize(12).fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary')).width('100%')
+              Scroll() {
+                Row({ space: 8 }) {
+                  ForEach(this.feedbackReasons, (reason: string) => {
+                    Button(reason).height(32).fontSize(9).borderRadius(16)
+                      .backgroundColor(reason === this.feedbackInterruptionReason ?
+                        $r('app.color.primary_green') : $r('app.color.ring_track'))
+                      .fontColor(reason === this.feedbackInterruptionReason ? Color.Black :
+                        $r('app.color.text_secondary'))
+                      .onClick(() => this.feedbackInterruptionReason = reason)
+                  }, (reason: string) => reason)
+                }
+              }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
+            }.width('100%')
+
+            TextArea({ text: this.feedbackOutcomeDraft,
+              placeholder: '写下实际产出或下一步（可选）' })
+              .width('100%').height(72).fontSize(12).fontColor($r('app.color.text_primary'))
+              .placeholderColor($r('app.color.text_tertiary'))
+              .backgroundColor($r('app.color.ring_track')).borderRadius(12).padding(10)
+              .onChange((value: string) => this.feedbackOutcomeDraft = value)
+
+            Row({ space: 10 }) {
+              Button('稍后再说').layoutWeight(1).height(40).fontSize(11).borderRadius(20)
+                .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+                .onClick(() => this.continueAfterSessionFeedback())
+              Button('保存复盘').layoutWeight(1).height(40).fontSize(11).fontWeight(FontWeight.Bold)
+                .borderRadius(20).backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+                .onClick(() => this.submitSessionFeedback())
+            }.width('100%')
+            Text('反馈会写入本轮记录，帮助智能体根据真实状态调整后续计划。')
+              .fontSize(9).lineHeight(14).fontColor($r('app.color.text_tertiary')).width('100%')
+          }
+          .width('100%').padding(18).backgroundColor($r('app.color.surface')).borderRadius(22)
+        }
+        .scrollBar(BarState.Off).constraintSize({ maxHeight: '86%' }).width('88%')
+      }
+      .width('100%').height('100%').justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center).backgroundColor('#99000000').zIndex(24)
+    }
+  }
+
+  @Builder
+  immersiveTimerOverlay() {
+    if (this.immersiveMode) {
+      Column({ space: 12 }) {
+        Row() {
+          Column({ space: 3 }) {
+            Text(this.isWorkMode ? '沉浸专注' : (this.isLongBreak ? '长休息' : '短休息'))
+              .fontSize(11).fontWeight(FontWeight.Bold)
+              .fontColor(this.isWorkMode ? $r('app.color.primary_red') : $r('app.color.primary_green'))
+            Text(`${this.todayCount}/${this.dailyTarget} 个今日目标`)
+              .fontSize(9).fontColor($r('app.color.text_tertiary'))
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          Button('退出沉浸').height(34).fontSize(10).borderRadius(17)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .onClick(() => this.immersiveMode = false)
+        }.width('100%')
+
+        Column({ space: 5 }) {
+          Text(this.currentTask.length > 0 ? this.currentTask :
+            (this.isWorkMode ? '专注于当前最重要的事情' : '放松一下，准备下一轮'))
+            .fontSize(18).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).textAlign(TextAlign.Center)
+          if (this.currentProject.length > 0 || this.currentTag.length > 0) {
+            Text(`${this.currentProject}${this.currentTag.length > 0 ? ` · #${this.currentTag}` : ''}`)
+              .fontSize(10).fontColor($r('app.color.text_tertiary'))
+          }
+        }.width('100%').alignItems(HorizontalAlign.Center)
+
+        Column() {
+          CircularProgress({
+            progress: this.progressValue,
+            remainingSeconds: this.remainingSeconds,
+            totalSeconds: this.totalSeconds,
+            isWorkMode: this.isWorkMode,
+            isLongBreak: this.isLongBreak
+          })
+          TimerControls({
+            isRunning: this.isRunning,
+            isWorkMode: this.isWorkMode,
+            onStartPause: () => this.onStartPause(),
+            onReset: () => this.onReset(),
+            onSkip: () => this.onSkipPhase()
+          }).margin({ top: 30 })
+        }.layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+
+        Text(this.isRunning ? '保持当前节奏，只做这一件事' : '准备好后开始，计时会按绝对截止时间恢复')
+          .fontSize(10).fontColor($r('app.color.text_tertiary')).textAlign(TextAlign.Center)
+          .width('100%').margin({ bottom: 18 })
+      }
+      .width('100%').height('100%').padding({ left: 24, right: 24, top: 28 })
+      .backgroundColor($r('app.color.background')).zIndex(10)
+    }
+  }
+
+  @Builder
   timerTab() {
     Stack() {
     Column() {
@@ -1156,6 +1367,11 @@ struct Index {
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Button('沉浸')
+          .height(30).fontSize(10).borderRadius(15)
+          .backgroundColor($r('app.color.ring_track'))
+          .fontColor($r('app.color.primary_green'))
+          .onClick(() => this.immersiveMode = true)
         Button(this.currentTask.length > 0 ? '修改' : '+ 添加')
           .height(30).fontSize(11).borderRadius(15)
           .backgroundColor($r('app.color.ring_track'))
@@ -1284,12 +1500,15 @@ struct Index {
     .height('100%')
     .padding({ left: 20, right: 20, top: 48 })
 
+    this.immersiveTimerOverlay()
+
     CelebrationOverlay({
       show: this.showCelebration,
       onDismiss: () => { this.showCelebration = false; }
     })
     this.taskEditorOverlay()
     this.endEarlyOverlay()
+    this.sessionFeedbackOverlay()
     }
   }
 
@@ -1382,7 +1601,7 @@ struct Index {
       }
       .tabBar(this.tabBarSettings)
     }
-    .barHeight(56)
+    .barHeight(this.immersiveMode && this.currentTabIndex === 0 ? 0 : 56)
     .barBackgroundColor($r('app.color.tab_bar_bg'))
     .barMode(BarMode.Fixed)
     .onChange((index: number) => {

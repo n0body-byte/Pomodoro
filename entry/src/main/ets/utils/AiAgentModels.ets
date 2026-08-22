@@ -13,6 +13,14 @@ export interface AiPlan {
   steps: AiPlanStep[];
 }
 
+export interface AiPlanChange {
+  index: number;
+  type: 'added' | 'removed' | 'modified' | 'unchanged';
+  currentStep?: AiPlanStep;
+  candidateStep?: AiPlanStep;
+  selected: boolean;
+}
+
 export interface AiPlanSnapshot {
   plan: AiPlan;
   source: string;
@@ -70,6 +78,13 @@ export interface AiAgentState {
   requestTraces?: AiRequestTrace[];
   tokenBudget?: number;
   consumedTokens?: number;
+  pendingPlan?: AiPlan;
+  pendingPlanReply?: string;
+  pendingPlanRequest?: string;
+  pendingPlanSource?: string;
+  pendingPlanCreatedAt?: number;
+  pendingPrimaryGoal?: string;
+  pendingPlanSelections?: boolean[];
 }
 
 export interface AiConversationSummary {

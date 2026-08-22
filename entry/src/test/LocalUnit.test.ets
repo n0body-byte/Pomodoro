@@ -10,6 +10,7 @@ import { AiPlanQualityHelper } from '../main/ets/utils/AiPlanQualityHelper';
 import { AiGoalReadinessHelper } from '../main/ets/utils/AiGoalReadinessHelper';
 import { AiPlanProgressHelper } from '../main/ets/utils/AiPlanProgressHelper';
 import { AiPlanVersionHelper } from '../main/ets/utils/AiPlanVersionHelper';
+import { AiPlanProposalHelper } from '../main/ets/utils/AiPlanProposalHelper';
 import { AiPlannerService } from '../main/ets/utils/AiPlannerService';
 import { CrossDeviceContinuationHelper } from '../main/ets/utils/CrossDeviceContinuationHelper';
 import { AiExecutionCheckInHelper } from '../main/ets/utils/AiExecutionCheckInHelper';
@@ -841,6 +842,58 @@ export default function localUnitTest() {
       expect(AiTokenBudgetHelper.addUsage(8000, 1500)).assertEqual(9500);
       expect(AiTokenBudgetHelper.addUsage(8000, -100)).assertEqual(8000);
       expect(AiTokenBudgetHelper.normalizeBudget(5000)).assertEqual(10000);
+    });
+
+    it('aiPlanProposalSupportsSelectiveApply', 0, () => {
+      const current: AiPlan = {
+        summary: '原计划',
+        steps: [
+          { title: '完成大纲', project: '报告', tag: '写作', note: '保存大纲',
+            estimatedPomodoros: 2, reason: '先搭结构', completed: false },
+          { title: '完成正文', project: '报告', tag: '写作', note: '保存正文',
+            estimatedPomodoros: 3, reason: '形成主体', completed: false }
+        ]
+      };
+      const candidate: AiPlan = {
+        summary: '新计划',
+        steps: [
+          { title: '完成大纲', project: '报告', tag: '写作', note: '保存大纲',
+            estimatedPomodoros: 1, reason: '压缩结构', completed: false },
+          { title: '完成正文', project: '报告', tag: '写作', note: '保存正文',
+            estimatedPomodoros: 2, reason: '形成主体', completed: false },
+          { title: '检查引用', project: '报告', tag: '检查', note: '引用可核验',
+            estimatedPomodoros: 1, reason: '保证交付', completed: false }
+        ]
+      };
+      const changes = AiPlanProposalHelper.buildChanges(current.steps, candidate.steps,
+        [true, false, true]);
+      const merged = AiPlanProposalHelper.merge(current, candidate, [true, false, true]);
+      expect(changes.length).assertEqual(3);
+      expect(changes[0].type).assertEqual('modified');
+      expect(changes[2].type).assertEqual('added');
+      expect(merged.steps.length).assertEqual(3);
+      expect(merged.steps[0].estimatedPomodoros).assertEqual(1);
+      expect(merged.steps[1].estimatedPomodoros).assertEqual(3);
+      expect(merged.summary).assertEqual('新计划');
+    });
+
+    it('sessionFeedbackUpdatesMatchingWorkRecord', 0, () => {
+      const history: SessionRecord[] = [
+        { date: '2026-08-22', workSeconds: 1500, completedAt: 100,
+          type: 'work', status: 'completed' },
+        { date: '2026-08-22', workSeconds: 300, completedAt: 200,
+          type: 'break', status: 'completed' }
+      ];
+      const applied = PreferencesHelper.applySessionFeedback(history, 100, {
+        focusRating: 6, energyRating: 0, interruptionReason: ' 通知消息 ',
+        outcomeNote: ' 完成大纲 ', reflectedAt: 300
+      });
+      expect(applied).assertTrue();
+      expect(history[0].focusRating).assertEqual(5);
+      expect(history[0].energyRating).assertEqual(1);
+      expect(history[0].interruptionReason).assertEqual('通知消息');
+      expect(history[0].outcomeNote).assertEqual('完成大纲');
+      expect(history[1].focusRating === undefined).assertTrue();
     });
   });
 }

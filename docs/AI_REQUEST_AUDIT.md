@@ -29,4 +29,4 @@
 
 调用审计中的 `usage.total_tokens` 同时进入对话级 Token 预算；达到上限后会阻止新的 DeepSeek 请求。详见 [DeepSeek Token 预算说明](AI_TOKEN_BUDGET.md)。
 
-单元测试覆盖 usage 捕获、远端响应判断和最近 20 条上限。当前项目共 `68/68` 项单元测试通过，HAP 构建通过。
+单元测试覆盖 usage 捕获、远端响应判断和最近 20 条上限。当前项目共 `70/70` 项单元测试通过，HAP 构建通过。

@@ -7,6 +7,7 @@ import { LocalFallbackPlanHelper } from '../utils/LocalFallbackPlanHelper';
 import { AiGoalReadinessHelper } from '../utils/AiGoalReadinessHelper';
 import { AiPlanQualityHelper } from '../utils/AiPlanQualityHelper';
 import { AiPlanVersionHelper } from '../utils/AiPlanVersionHelper';
+import { AiPlanProposalHelper, AiPlanProposalStats } from '../utils/AiPlanProposalHelper';
 import { AiExecutionCheckInHelper } from '../utils/AiExecutionCheckInHelper';
 import { AiRequestTraceHelper } from '../utils/AiRequestTraceHelper';
 import { WearableAdjustmentRequest, WearableHealthHelper } from '../utils/WearableHealthHelper';
@@ -29,6 +30,7 @@ import {
   AiGoalDriftInsight,
   AiGoalReadinessInsight,
   AiPlan,
+  AiPlanChange,
   AiPlanInsight,
   AiPlanQualityInsight,
   AiPlanSnapshot,
@@ -104,6 +106,14 @@ export struct AiPlanner {
   @State showRequestTraces: boolean = false;
   @State tokenBudget: number = DEFAULT_AI_TOKEN_BUDGET;
   @State consumedTokens: number = 0;
+  @State pendingPlanSummary: string = '';
+  @State pendingPlanSteps: AiPlanStep[] = [];
+  @State pendingPlanReply: string = '';
+  @State pendingPlanRequest: string = '';
+  @State pendingPlanSource: string = 'ai';
+  @State pendingPlanCreatedAt: number = 0;
+  @State pendingPrimaryGoal: string = '';
+  @State pendingPlanSelections: boolean[] = [];
   @State pendingWearableAdjustment: WearableAdjustmentRequest =
     WearableHealthHelper.emptyAdjustmentRequest();
   onApplyStep?: (step: AiPlanStep, conversationId: string) => void;
@@ -116,6 +126,7 @@ export struct AiPlanner {
     '用两个小时整理本周工作并规划下周'
   ];
   private isRestoringContinuation: boolean = false;
+  private proposalPrimaryGoalDraft: string = '';
 
   private onWearableAdjustmentChange(): void {
     if (this.wearableAdjustment.id.length === 0) {
@@ -251,6 +262,28 @@ export struct AiPlanner {
       typeof state.tokenBudget === 'number' ? state.tokenBudget : DEFAULT_AI_TOKEN_BUDGET);
     this.consumedTokens = typeof state.consumedTokens === 'number' ?
       Math.max(0, Math.round(state.consumedTokens)) : 0;
+    if (state.pendingPlan !== undefined && Array.isArray(state.pendingPlan.steps) &&
+      state.pendingPlan.steps.length > 0) {
+      this.pendingPlanSummary = state.pendingPlan.summary;
+      this.pendingPlanSteps = state.pendingPlan.steps;
+      this.pendingPlanReply = typeof state.pendingPlanReply === 'string' ? state.pendingPlanReply : '';
+      this.pendingPlanRequest = typeof state.pendingPlanRequest === 'string' ? state.pendingPlanRequest : '';
+      this.pendingPlanSource = typeof state.pendingPlanSource === 'string' ? state.pendingPlanSource : 'ai';
+      this.pendingPlanCreatedAt = typeof state.pendingPlanCreatedAt === 'number' ?
+        state.pendingPlanCreatedAt : 0;
+      this.pendingPrimaryGoal = typeof state.pendingPrimaryGoal === 'string' ?
+        state.pendingPrimaryGoal : '';
+      const savedSelections = Array.isArray(state.pendingPlanSelections) ?
+        state.pendingPlanSelections : [];
+      const selections: boolean[] = [];
+      const count = Math.max(this.planSteps.length, state.pendingPlan.steps.length);
+      for (let index = 0; index < count; index++) {
+        selections.push(savedSelections[index] !== false);
+      }
+      this.pendingPlanSelections = selections;
+    } else {
+      this.clearPendingPlan();
+    }
     this.executionCheckInDraft = state.needsReview && state.lastExecutionCheckIn !== undefined &&
       state.lastExecutionCheckIn.stepTitle === state.lastCompletedStepTitle &&
       (this.lastCompletedStepProject.length === 0 ||
@@ -318,8 +351,126 @@ export struct AiPlanner {
       lastExecutionCheckIn: this.lastExecutionCheckIn,
       requestTraces: this.requestTraces,
       tokenBudget: this.tokenBudget,
-      consumedTokens: this.consumedTokens
+      consumedTokens: this.consumedTokens,
+      pendingPlan: this.pendingPlanSteps.length > 0 ? {
+        summary: this.pendingPlanSummary,
+        steps: this.pendingPlanSteps
+      } : undefined,
+      pendingPlanReply: this.pendingPlanReply,
+      pendingPlanRequest: this.pendingPlanRequest,
+      pendingPlanSource: this.pendingPlanSource,
+      pendingPlanCreatedAt: this.pendingPlanCreatedAt,
+      pendingPrimaryGoal: this.pendingPrimaryGoal,
+      pendingPlanSelections: this.pendingPlanSelections
     };
+  }
+
+  private createDefaultSelections(count: number): boolean[] {
+    const selections: boolean[] = [];
+    for (let index = 0; index < count; index++) {
+      selections.push(true);
+    }
+    return selections;
+  }
+
+  private clearPendingPlan(): void {
+    this.pendingPlanSummary = '';
+    this.pendingPlanSteps = [];
+    this.pendingPlanReply = '';
+    this.pendingPlanRequest = '';
+    this.pendingPlanSource = 'ai';
+    this.pendingPlanCreatedAt = 0;
+    this.pendingPrimaryGoal = '';
+    this.pendingPlanSelections = [];
+  }
+
+  private stagePlanProposal(request: string, reply: string, plan: AiPlan, source: string): void {
+    this.pendingPlanSummary = plan.summary;
+    this.pendingPlanSteps = plan.steps;
+    this.pendingPlanReply = reply;
+    this.pendingPlanRequest = request;
+    this.pendingPlanSource = source;
+    this.pendingPlanCreatedAt = Date.now();
+    this.pendingPrimaryGoal = this.proposalPrimaryGoalDraft;
+    this.proposalPrimaryGoalDraft = '';
+    this.pendingPlanSelections = this.createDefaultSelections(
+      Math.max(this.planSteps.length, plan.steps.length));
+  }
+
+  private async togglePendingPlanSelection(index: number): Promise<void> {
+    const selections: boolean[] = [];
+    const count = Math.max(this.planSteps.length, this.pendingPlanSteps.length);
+    for (let itemIndex = 0; itemIndex < count; itemIndex++) {
+      const current = this.pendingPlanSelections[itemIndex] !== false;
+      selections.push(itemIndex === index ? !current : current);
+    }
+    this.pendingPlanSelections = selections;
+    await this.saveAgentState(this.needsReview);
+  }
+
+  private async selectAllPendingChanges(selected: boolean): Promise<void> {
+    const selections: boolean[] = [];
+    const count = Math.max(this.planSteps.length, this.pendingPlanSteps.length);
+    for (let index = 0; index < count; index++) {
+      selections.push(selected);
+    }
+    this.pendingPlanSelections = selections;
+    await this.saveAgentState(this.needsReview);
+  }
+
+  private async rejectPendingPlan(): Promise<void> {
+    if (this.pendingPlanSteps.length === 0) {
+      return;
+    }
+    const request = this.pendingPlanRequest;
+    this.clearPendingPlan();
+    await this.saveAgentState(this.needsReview);
+    this.successMessage = request.length > 0 ? '已拒绝本次调整，原计划保持不变' : '已关闭计划提案';
+  }
+
+  private async applyPendingPlan(applyAll: boolean): Promise<void> {
+    if (this.pendingPlanSteps.length === 0) {
+      return;
+    }
+    const candidate: AiPlan = {
+      summary: this.pendingPlanSummary,
+      steps: this.pendingPlanSteps
+    };
+    const hadExistingPlan = this.planSteps.length > 0;
+    const nextPlan = applyAll ? AiPlanVersionHelper.copyPlan(candidate) :
+      AiPlanProposalHelper.merge(
+        { summary: this.summary, steps: this.planSteps }, candidate, this.pendingPlanSelections);
+    if (nextPlan.steps.length === 0) {
+      this.errorMessage = '至少保留一个可执行步骤';
+      return;
+    }
+    const quality = this.evaluateCandidatePlan(nextPlan);
+    if (!quality.canApply) {
+      this.errorMessage = `所选修改无法应用：${quality.description}`;
+      return;
+    }
+    this.capturePreviousPlan(nextPlan);
+    this.summary = nextPlan.summary;
+    this.planSteps = nextPlan.steps;
+    this.planSource = this.pendingPlanSource;
+    const changesPrimaryGoal = this.pendingPrimaryGoal.length > 0;
+    if (changesPrimaryGoal) {
+      this.primaryGoal = this.pendingPrimaryGoal;
+      this.lastExecutionReplanKey = '';
+    }
+    this.clearPendingPlan();
+    this.lastFailedMessage = '';
+    this.needsReview = false;
+    this.goalDriftInsight = AiAgentP1Helper.emptyDrift();
+    if (this.executionInsight.shouldReplan && !changesPrimaryGoal) {
+      this.lastExecutionReplanKey = this.getExecutionReplanKey(this.executionInsight);
+    }
+    this.errorMessage = '';
+    await this.refreshAgentAnalysis();
+    await this.saveAgentState(false);
+    this.successMessage = applyAll ? (hadExistingPlan ?
+      '已应用完整提案，原计划已保留为可恢复版本' : '已应用计划提案，可以开始第一步') :
+      '已应用所选修改，未勾选部分保持原计划';
   }
 
   private createPreviousPlanSnapshot(): AiPlanSnapshot | undefined {
@@ -417,6 +568,7 @@ export struct AiPlanner {
     this.consumedTokens = 0;
     this.planSource = 'none';
     this.clearPreviousPlan();
+    this.clearPendingPlan();
     this.successMessage = '已开始新对话';
     await this.loadConversationHistory();
   }
@@ -594,6 +746,16 @@ export struct AiPlanner {
         recentSummary += `${record.date} ${type}${Math.round(record.workSeconds / 60)}分钟 ${status}`;
         if (record.task !== undefined && record.task.length > 0) {
           recentSummary += ` 任务:${record.task}`;
+        }
+        if (record.focusRating !== undefined && record.energyRating !== undefined) {
+          recentSummary += ` 专注:${record.focusRating}/5 精力:${record.energyRating}/5`;
+        }
+        if (record.interruptionReason !== undefined && record.interruptionReason.length > 0 &&
+          record.interruptionReason !== '无') {
+          recentSummary += ` 打断:${record.interruptionReason}`;
+        }
+        if (record.outcomeNote !== undefined && record.outcomeNote.length > 0) {
+          recentSummary += ` 产出:${record.outcomeNote}`;
         }
         recentSummary += '\n';
       }
@@ -814,21 +976,13 @@ export struct AiPlanner {
     }
     const message = `请以主目标“${this.primaryGoal}”为唯一方向，重新检查当前计划。` +
       `只吸收最近指令中与主目标一致的调整，删除无关内容，并给出下一步。`;
-    if (await this.askAgent(message)) {
-      this.goalDriftInsight = AiAgentP1Helper.emptyDrift();
-      await this.saveAgentState(false);
-    }
+    await this.askAgent(message);
   }
 
   private async requestExecutionReplan(): Promise<void> {
-    const key = this.getExecutionReplanKey(this.executionInsight);
     const message = `真实执行数据表明：${this.executionInsight.description}` +
       `请按实际速度重排剩余计划，保留已完成步骤，并重新设置估时和缓冲。`;
-    if (await this.askAgent(message)) {
-      this.lastExecutionReplanKey = key;
-      await this.refreshAgentAnalysis();
-      await this.saveAgentState(false);
-    }
+    await this.askAgent(message);
   }
 
   private async retryLastRequest(): Promise<void> {
@@ -949,6 +1103,10 @@ export struct AiPlanner {
       this.errorMessage = '请告诉 AI 你想规划或调整什么';
       return false;
     }
+    if (this.pendingPlanSteps.length > 0) {
+      this.errorMessage = '请先应用或拒绝当前计划提案，再继续调用 AI';
+      return false;
+    }
     if (!this.prepareDeadline()) {
       return false;
     }
@@ -1031,24 +1189,21 @@ export struct AiPlanner {
             return false;
           }
           this.recordRequestTrace('质量门自动修复', repairStartedAt, repairResult,
-            'repaired', '修复结果已通过本地质量门并采用');
+            'repaired', '修复结果已通过本地质量门，等待用户确认');
           acceptedResult = repairResult;
           repaired = true;
         } else {
           this.recordRequestTrace(requestAction, requestStartedAt, result,
-            'accepted', '响应已通过本地质量门并采用');
+            'accepted', '响应已通过本地质量门，等待用户确认');
         }
         this.appendMessages(normalized, acceptedResult.reply);
-        this.capturePreviousPlan(acceptedResult.plan);
-        this.summary = acceptedResult.plan.summary;
-        this.planSteps = acceptedResult.plan.steps;
-        this.planSource = 'ai';
+        this.stagePlanProposal(normalized, acceptedResult.reply, acceptedResult.plan, 'ai');
         this.lastFailedMessage = '';
-        this.needsReview = false;
-        await this.refreshAgentAnalysis();
-        await this.saveAgentState(false);
+        await this.saveAgentState(this.needsReview);
         if (repaired) {
-          this.successMessage = '首版计划未通过本地质检，智能体已自动修正一次并通过';
+          this.successMessage = '首版未通过质检，智能体已修正并生成待确认提案';
+        } else {
+          this.successMessage = 'AI 已生成计划提案，请核对变更后再应用';
         }
         return true;
       }
@@ -1073,14 +1228,11 @@ export struct AiPlanner {
         this.lastFailedMessage = normalized;
         return false;
       }
-      this.capturePreviousPlan(result.plan);
-      this.summary = result.plan.summary;
-      this.planSteps = result.plan.steps;
-      this.planSource = 'ai';
       this.appendMessages(normalized, result.plan.summary);
+      this.stagePlanProposal(normalized, result.plan.summary, result.plan, 'ai');
       this.lastFailedMessage = '';
-      await this.refreshAgentAnalysis();
-      await this.saveAgentState(false);
+      await this.saveAgentState(this.needsReview);
+      this.successMessage = '代理已生成计划提案，请核对变更后再应用';
       return true;
     } catch {
       this.errorMessage = '智能体执行中断，请重试上次行动';
@@ -1102,14 +1254,11 @@ export struct AiPlanner {
     }
     const deadlineText = this.deadline.trim().length > 0 ? this.deadline.trim() : '未指定';
     const effectiveMinutes = this.getEffectiveAvailableMinutes();
-    const previousPrimaryGoal = this.primaryGoal;
-    this.primaryGoal = this.goal.trim();
-    this.goalDriftInsight = AiAgentP1Helper.emptyDrift();
-    this.lastExecutionReplanKey = '';
+    this.proposalPrimaryGoalDraft = this.goal.trim();
     const message = `请制定或重新规划这个目标：${this.goal.trim()}。` +
       `我在截止约束内可用 ${effectiveMinutes} 分钟，截止时间：${deadlineText}。`;
     if (!await this.askAgent(message)) {
-      this.primaryGoal = previousPrimaryGoal;
+      this.proposalPrimaryGoalDraft = '';
       await this.refreshAgentAnalysis();
     }
   }
@@ -1121,6 +1270,55 @@ export struct AiPlanner {
     }
   }
 
+  private getPendingPlanChanges(): AiPlanChange[] {
+    return AiPlanProposalHelper.buildChanges(
+      this.planSteps, this.pendingPlanSteps, this.pendingPlanSelections);
+  }
+
+  private getPendingPlanStats(): AiPlanProposalStats {
+    return AiPlanProposalHelper.getStats(
+      this.planSteps, this.pendingPlanSteps, this.pendingPlanSelections);
+  }
+
+  private getChangeLabel(change: AiPlanChange): string {
+    if (change.type === 'added') {
+      return '新增';
+    }
+    if (change.type === 'removed') {
+      return '删除';
+    }
+    if (change.type === 'modified') {
+      return '修改';
+    }
+    return '不变';
+  }
+
+  private getChangeTitle(change: AiPlanChange): string {
+    if (change.candidateStep !== undefined) {
+      return change.candidateStep.title;
+    }
+    if (change.currentStep !== undefined) {
+      return change.currentStep.title;
+    }
+    return '未命名步骤';
+  }
+
+  private getChangeDetail(change: AiPlanChange): string {
+    if (change.type === 'modified' && change.currentStep !== undefined &&
+      change.candidateStep !== undefined) {
+      return `原：${change.currentStep.title} · ${change.currentStep.estimatedPomodoros} 个番茄\n` +
+        `新：${change.candidateStep.title} · ${change.candidateStep.estimatedPomodoros} 个番茄`;
+    }
+    if (change.type === 'added' && change.candidateStep !== undefined) {
+      return `${change.candidateStep.project} · ${change.candidateStep.estimatedPomodoros} 个番茄`;
+    }
+    if (change.type === 'removed' && change.currentStep !== undefined) {
+      return `${change.currentStep.project} · ${change.currentStep.estimatedPomodoros} 个番茄`;
+    }
+    const step = change.candidateStep !== undefined ? change.candidateStep : change.currentStep;
+    return step !== undefined ? `${step.project} · ${step.estimatedPomodoros} 个番茄` : '';
+  }
+
   private async reviewCompletedStep(): Promise<void> {
     const title = this.lastCompletedStepTitle.length > 0 ? this.lastCompletedStepTitle : '刚才的任务';
     if (!AiExecutionCheckInHelper.matchesStep(this.lastExecutionCheckIn,
@@ -1129,15 +1327,9 @@ export struct AiPlanner {
       this.errorMessage = '请先核验这一步的实际产出，再让 Agent 复盘';
       return;
     }
-    const executionKey = this.executionInsight.shouldReplan ?
-      this.getExecutionReplanKey(this.executionInsight) : '';
     const message = AiExecutionCheckInHelper.buildReviewMessage(this.lastExecutionCheckIn) +
       '请结合最新专注数据复盘，判断后续计划是否需要调整，并告诉我下一轮最应该做什么。';
-    if (await this.askAgent(message) && executionKey.length > 0) {
-      this.lastExecutionReplanKey = executionKey;
-      await this.refreshAgentAnalysis();
-      await this.saveAgentState(false);
-    }
+    await this.askAgent(message);
   }
 
   private applyStep(step: AiPlanStep): void {
@@ -2026,7 +2218,7 @@ export struct AiPlanner {
       this.deadlineInsightCard(this.getDeadlineInsight())
       Button(this.isLoading ? '智能体正在分析…' : '生成或重排计划')
         .width('100%').height(46).fontSize(14).fontWeight(FontWeight.Bold)
-        .enabled(!this.isLoading && this.getGoalReadiness().ready &&
+        .enabled(!this.isLoading && this.pendingPlanSteps.length === 0 && this.getGoalReadiness().ready &&
           this.getDeadlineInsight().status !== 'unsupported' &&
           this.getDeadlineInsight().status !== 'expired')
         .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(23)
@@ -2067,7 +2259,7 @@ export struct AiPlanner {
 
   @Builder
   private followUpCard() {
-    if (this.planSteps.length > 0) {
+    if (this.planSteps.length > 0 && this.pendingPlanSteps.length === 0) {
       Column({ space: 8 }) {
         Text('继续调整').fontSize(14).fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary')).width('100%')
@@ -2097,6 +2289,94 @@ export struct AiPlanner {
         }.width('100%')
       }
       .width('100%').padding(14).backgroundColor($r('app.color.surface')).borderRadius(16)
+    }
+  }
+
+  @Builder
+  private planProposalCard(stats: AiPlanProposalStats) {
+    if (this.pendingPlanSteps.length > 0) {
+      Column({ space: 12 }) {
+        Row({ space: 8 }) {
+          Column({ space: 3 }) {
+            Text('AI 计划修改提案').fontSize(16).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary')).width('100%')
+            Text('提案尚未生效，你可以逐项决定是否采用')
+              .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          Text('待确认').fontSize(9).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.accent_yellow'))
+            .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+            .backgroundColor($r('app.color.ring_track')).borderRadius(12)
+        }.width('100%')
+
+        Text(this.pendingPlanSummary).fontSize(11).lineHeight(17)
+          .fontColor($r('app.color.text_secondary')).width('100%')
+
+        Row({ space: 7 }) {
+          Text(`+${stats.added} 新增`).fontSize(9).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.primary_green')).padding({ left: 8, right: 8, top: 5, bottom: 5 })
+            .backgroundColor($r('app.color.ring_track')).borderRadius(10)
+          Text(`~${stats.modified} 修改`).fontSize(9).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.accent_yellow')).padding({ left: 8, right: 8, top: 5, bottom: 5 })
+            .backgroundColor($r('app.color.ring_track')).borderRadius(10)
+          Text(`-${stats.removed} 删除`).fontSize(9).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.primary_red')).padding({ left: 8, right: 8, top: 5, bottom: 5 })
+            .backgroundColor($r('app.color.ring_track')).borderRadius(10)
+          Blank()
+          Text(`${stats.currentPomodoros} → ${stats.candidatePomodoros} 番茄`)
+            .fontSize(9).fontColor($r('app.color.text_secondary'))
+        }.width('100%')
+
+        Column({ space: 8 }) {
+          ForEach(this.getPendingPlanChanges(), (change: AiPlanChange) => {
+            Row({ space: 10 }) {
+              Button(change.type === 'unchanged' ? '—' : (change.selected ? '✓' : ''))
+                .width(30).height(30).fontSize(12).fontWeight(FontWeight.Bold).padding(0)
+                .enabled(change.type !== 'unchanged')
+                .fontColor(change.selected ? Color.Black : $r('app.color.text_tertiary'))
+                .backgroundColor(change.selected ?
+                  $r('app.color.primary_green') : $r('app.color.ring_track'))
+                .borderRadius(15).onClick(() => this.togglePendingPlanSelection(change.index))
+              Column({ space: 3 }) {
+                Row({ space: 6 }) {
+                  Text(this.getChangeLabel(change)).fontSize(9).fontWeight(FontWeight.Bold)
+                    .fontColor(change.type === 'added' ? $r('app.color.primary_green') :
+                      (change.type === 'removed' ? $r('app.color.primary_red') :
+                        $r('app.color.accent_yellow')))
+                  Text(this.getChangeTitle(change)).fontSize(12).fontWeight(FontWeight.Bold)
+                    .fontColor($r('app.color.text_primary')).layoutWeight(1).maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }.width('100%')
+                Text(this.getChangeDetail(change)).fontSize(9).lineHeight(14)
+                  .fontColor($r('app.color.text_tertiary')).width('100%')
+              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+            }
+            .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(12)
+          }, (change: AiPlanChange) => `${change.index}-${change.type}`)
+        }.width('100%')
+
+        Row({ space: 8 }) {
+          Button('全选').layoutWeight(1).height(32).fontSize(9).borderRadius(16)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .onClick(() => this.selectAllPendingChanges(true))
+          Button('清除选择').layoutWeight(1).height(32).fontSize(9).borderRadius(16)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .onClick(() => this.selectAllPendingChanges(false))
+        }.width('100%')
+        Row({ space: 8 }) {
+          Button('拒绝').layoutWeight(1).height(38).fontSize(10).borderRadius(19)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_red'))
+            .onClick(() => this.rejectPendingPlan())
+          Button(`应用所选（${stats.selected}）`).layoutWeight(1).height(38).fontSize(10).borderRadius(19)
+            .enabled(stats.selected > 0).backgroundColor($r('app.color.ring_track'))
+            .fontColor($r('app.color.primary_green')).onClick(() => this.applyPendingPlan(false))
+          Button('全部应用').layoutWeight(1).height(38).fontSize(10).fontWeight(FontWeight.Bold)
+            .borderRadius(19).backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+            .onClick(() => this.applyPendingPlan(true))
+        }.width('100%')
+      }
+      .width('100%').padding(15).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.accent_yellow') }).borderRadius(18)
     }
   }
 
@@ -2197,6 +2477,7 @@ export struct AiPlanner {
           .padding(12).backgroundColor('#2065FE08').borderRadius(12)
       }
       this.conversationCard()
+      this.planProposalCard(this.getPendingPlanStats())
       if (this.planSteps.length > 0) {
         Row() {
           Text('执行计划').fontSize(16).fontWeight(FontWeight.Bold)

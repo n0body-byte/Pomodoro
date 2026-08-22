@@ -118,7 +118,12 @@ export struct History {
       project: this.editProject.trim(),
       tag: this.editTag.trim(),
       note: this.editNote.trim(),
-      source: original !== null ? original.source || 'timer' : 'manual'
+      source: original !== null ? original.source || 'timer' : 'manual',
+      focusRating: original !== null ? original.focusRating : undefined,
+      energyRating: original !== null ? original.energyRating : undefined,
+      interruptionReason: original !== null ? original.interruptionReason : undefined,
+      outcomeNote: original !== null ? original.outcomeNote : undefined,
+      reflectedAt: original !== null ? original.reflectedAt : undefined
     };
     await PreferencesHelper.updateSessionRecord(this.getContext(), record);
     this.showEditor = false;
@@ -269,6 +274,23 @@ export struct History {
                 }
                 if (record.note && record.note.length > 0) {
                   Text(record.note).fontSize(11).fontColor($r('app.color.text_tertiary')).width('100%')
+                }
+                if (record.focusRating !== undefined && record.energyRating !== undefined) {
+                  Row({ space: 8 }) {
+                    Text(`专注 ${record.focusRating}/5`).fontSize(10).fontWeight(FontWeight.Medium)
+                      .fontColor($r('app.color.primary_green'))
+                    Text(`精力 ${record.energyRating}/5`).fontSize(10).fontWeight(FontWeight.Medium)
+                      .fontColor($r('app.color.accent_yellow'))
+                    if (record.interruptionReason !== undefined && record.interruptionReason !== '无') {
+                      Text(`打断：${record.interruptionReason}`).fontSize(10)
+                        .fontColor($r('app.color.text_secondary'))
+                    }
+                  }.width('100%')
+                }
+                if (record.outcomeNote !== undefined && record.outcomeNote.length > 0) {
+                  Text(`产出：${record.outcomeNote}`).fontSize(10).lineHeight(15)
+                    .fontColor($r('app.color.text_secondary')).width('100%')
+                    .padding(8).backgroundColor($r('app.color.ring_track')).borderRadius(8)
                 }
                 Row({ space: 8 }) {
                   Blank()

@@ -63,6 +63,19 @@ export interface SessionRecord {
   tag?: string;
   note?: string;
   source?: 'timer' | 'manual';
+  focusRating?: number;
+  energyRating?: number;
+  interruptionReason?: string;
+  outcomeNote?: string;
+  reflectedAt?: number;
+}
+
+export interface SessionFeedback {
+  focusRating: number;
+  energyRating: number;
+  interruptionReason: string;
+  outcomeNote: string;
+  reflectedAt: number;
 }
 
 export interface TaskContext {
@@ -194,6 +207,34 @@ export class PreferencesHelper {
     } catch {
       return [];
     }
+  }
+
+  static applySessionFeedback(history: SessionRecord[], completedAt: number,
+    feedback: SessionFeedback): boolean {
+    for (let index = history.length - 1; index >= 0; index--) {
+      const record = history[index];
+      if (record !== undefined && record.completedAt === completedAt && record.type !== 'break') {
+        record.focusRating = Math.max(1, Math.min(5, Math.round(feedback.focusRating)));
+        record.energyRating = Math.max(1, Math.min(5, Math.round(feedback.energyRating)));
+        record.interruptionReason = feedback.interruptionReason.trim();
+        record.outcomeNote = feedback.outcomeNote.trim();
+        record.reflectedAt = feedback.reflectedAt;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static async saveSessionFeedback(context: Context, completedAt: number,
+    feedback: SessionFeedback): Promise<boolean> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    const history = await PreferencesHelper.loadSessionHistory(context);
+    if (!PreferencesHelper.applySessionFeedback(history, completedAt, feedback)) {
+      return false;
+    }
+    await prefs.put(PREF_KEY_SESSION_HISTORY, JSON.stringify(history));
+    await prefs.flush();
+    return true;
   }
 
   static async saveWearableBaseline(context: Context, bpm: number): Promise<void> {
@@ -798,6 +839,11 @@ export class PreferencesHelper {
           savedAt: typeof state.previousPlan.savedAt === 'number' ? state.previousPlan.savedAt : 0
         };
       }
+      let pendingPlan: AiPlan | undefined = undefined;
+      if (state.pendingPlan !== undefined && Array.isArray(state.pendingPlan.steps) &&
+        state.pendingPlan.steps.length > 0) {
+        pendingPlan = state.pendingPlan;
+      }
       let lastExecutionCheckIn: AiExecutionCheckIn | undefined = undefined;
       if (state.lastExecutionCheckIn !== undefined &&
         typeof state.lastExecutionCheckIn.stepTitle === 'string' &&
@@ -860,7 +906,16 @@ export class PreferencesHelper {
         tokenBudget: typeof state.tokenBudget === 'number' ?
           Math.max(10000, Math.min(100000, Math.round(state.tokenBudget))) : 30000,
         consumedTokens: typeof state.consumedTokens === 'number' ?
-          Math.max(0, Math.round(state.consumedTokens)) : 0
+          Math.max(0, Math.round(state.consumedTokens)) : 0,
+        pendingPlan: pendingPlan,
+        pendingPlanReply: typeof state.pendingPlanReply === 'string' ? state.pendingPlanReply : '',
+        pendingPlanRequest: typeof state.pendingPlanRequest === 'string' ? state.pendingPlanRequest : '',
+        pendingPlanSource: typeof state.pendingPlanSource === 'string' ? state.pendingPlanSource : 'ai',
+        pendingPlanCreatedAt: typeof state.pendingPlanCreatedAt === 'number' ?
+          state.pendingPlanCreatedAt : 0,
+        pendingPrimaryGoal: typeof state.pendingPrimaryGoal === 'string' ? state.pendingPrimaryGoal : '',
+        pendingPlanSelections: Array.isArray(state.pendingPlanSelections) ?
+          state.pendingPlanSelections : []
       };
     } catch {
       return emptyState;
