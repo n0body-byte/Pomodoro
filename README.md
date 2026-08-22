@@ -40,6 +40,8 @@
 - AI 计划安全回退：模型确实改动已有计划时自动保留单级快照，支持不调用 AI 一键恢复上版，并随会话历史持久化
 - HarmonyOS 跨设备接续原型：可在手机、平板和 2in1 设备间迁移当前倒计时、任务、Agent 计划与近期专注记录
 - 跨设备冲突保护：记录最近一次已应用快照的时间和传输标识，重复或更旧的接续不会回滚本机状态
+- 无真机穿戴协同原型：设置页内置虚拟手表，可同步控制计时并模拟平稳、压力、运动和断连场景
+- 心率自适应安全链路：本地规则先过滤运动干扰和无效样本，仅将聚合摘要带入 Agent，计划调整需用户确认
 - AI 页面响应式布局：手机保持连续单列，窗口达到 720vp 后自动切换为“控制与上下文 / 对话与执行计划”5:7 双栏
 
 ## 应用界面
@@ -59,7 +61,7 @@
 | 评分项 | 可直接检查的证据 |
 |---|---|
 | 创新性 | AI 多轮执行、真实专注数据上下文、本地计划健康度、超载预警与闭环复盘 |
-| 完备度 | 4 个清晰主 Tab、数据中心三分区、Agent 记忆、执行核验、调用审计、Token 预算、截止约束、计划回退、弱网兜底、跨设备接续、历史修正、会话恢复、60 项核心单元测试 |
+| 完备度 | 4 个清晰主 Tab、数据中心三分区、Agent 记忆、执行核验、调用审计、Token 预算、截止约束、计划回退、弱网兜底、跨设备接续、虚拟手表、历史修正、会话恢复、64 项核心单元测试 |
 | 前景评估 | [项目说明第九章](说明文档.md#九产品前景与社会价值)中的用户、社会价值、商业路径与风险分析 |
 | 规范性 | 分层 ArkTS 源码、README、隐私说明、版本记录、测试矩阵、真实截图和 PDF |
 | 实际应用价值 | [版本化未签名 HAP](output/hap/Pomodoro-1.1.0-unsigned.hap)、完整源码和五分钟演示脚本 |
@@ -150,6 +152,10 @@ HAP 与 PDF 的 SHA-256 校验值见 [`output/CHECKSUMS.sha256`](output/CHECKSUM
 
 接续数据带有版本号和唯一传输标识，目标端会校验格式、拒绝超大载荷，并对重复传输和历史记录去重。DeepSeek API Key 不进入快照。该能力属于 HarmonyOS 应用接续，不是多个设备同时编辑的实时云同步；完整操作条件与验证清单见 [跨设备接续说明](docs/CROSS_DEVICE_CONTINUATION.md)。
 
+## 穿戴协同原型
+
+在“设置 > 穿戴协同实验室”可以打开虚拟手表，无需真机即可验证计时控制、心率场景、本地适应规则和 Agent 调整入口。模拟数据会明确标注，所有计划调整都需要用户确认；真实手表接入时只替换 `HeartRateProvider` 数据源。设计边界、隐私策略和真机验收清单见 [穿戴协同原型说明](docs/WEARABLE_PROTOTYPE.md)。
+
 ## 可选 AI 代理
 
 `ai-proxy/` 提供一个最小 OpenAI Responses API 代理，密钥只保存在服务端环境变量中：
@@ -187,7 +193,7 @@ node .\ai-proxy\server.mjs
 hvigorw test -p module=entry
 ```
 
-当前验证结果：`60/60` 单元测试通过，`assembleHap` 构建通过。
+当前验证结果：`64/64` 单元测试通过，`assembleHap` 构建通过。
 
 完整手动验证矩阵、架构说明、评分点映射与产品前景分析见 [项目说明文档](说明文档.md)，排版版 PDF 见 [项目说明文档 PDF](output/pdf/番茄钟项目说明文档.pdf)。
 
@@ -208,6 +214,7 @@ entry/src/main/ets/
 - [PDF 版项目说明](output/pdf/番茄钟项目说明文档.pdf)
 - [AI 代理说明](ai-proxy/README.md)
 - [跨设备接续说明](docs/CROSS_DEVICE_CONTINUATION.md)
+- [穿戴协同原型说明](docs/WEARABLE_PROTOTYPE.md)
 - [Agent 执行核验说明](docs/AGENT_EXECUTION_CHECKIN.md)
 - [DeepSeek 调用审计说明](docs/AI_REQUEST_AUDIT.md)
 - [Agent 截止约束说明](docs/AGENT_DEADLINE_CONSTRAINT.md)

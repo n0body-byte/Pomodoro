@@ -2,6 +2,7 @@ import { ConfigurationConstant, common } from '@kit.AbilityKit';
 import { CircularProgress } from '../components/CircularProgress';
 import { TimerControls } from '../components/TimerControls';
 import { CelebrationOverlay } from '../components/CelebrationOverlay';
+import { WearableLab } from '../components/WearableLab';
 import { PreferencesHelper, TaskContext } from '../utils/PreferencesHelper';
 import { SoundHelper } from '../utils/SoundHelper';
 import { AmbientHelper } from '../utils/AmbientHelper';
@@ -64,6 +65,8 @@ struct Index {
   @State estimateDraft: number = 1;
   @State showAiStepHandoff: boolean = false;
   @State completedAiStepTitle: string = '';
+  @State showWearableLab: boolean = false;
+  @State wearableAdjustmentPrompt: string = '';
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
@@ -292,6 +295,37 @@ struct Index {
     this.dismissAiStepHandoff();
     this.currentTabIndex = 1;
     this.tabsController.changeIndex(1);
+  }
+
+  private openWearableLab(): void {
+    this.showWearableLab = true;
+  }
+
+  private closeWearableLab(): void {
+    this.showWearableLab = false;
+  }
+
+  private pauseForWearableRecovery(): void {
+    if (this.isRunning) {
+      this.stopTimer();
+      this.saveCurrentState();
+    }
+  }
+
+  private openAgentWithWearableSuggestion(prompt: string): void {
+    this.wearableAdjustmentPrompt = prompt;
+    this.showWearableLab = false;
+    this.currentTabIndex = 1;
+    this.tabsController.changeIndex(1);
+  }
+
+  private consumeWearableSuggestion(): void {
+    this.wearableAdjustmentPrompt = '';
+  }
+
+  private skipFromWearable(): void {
+    this.showWearableLab = false;
+    this.onSkipPhase();
   }
 
   private openTaskEditor(): void {
@@ -1177,6 +1211,7 @@ struct Index {
   }
 
   build() {
+    Stack() {
     Tabs({ barPosition: BarPosition.End, controller: this.tabsController }) {
       TabContent() {
         this.timerTab()
@@ -1199,6 +1234,8 @@ struct Index {
           currentTaskCompleted: this.currentTaskCompleted,
           currentTaskSource: this.currentTaskSource,
           currentTaskConversationId: this.currentTaskConversationId,
+          wearableSuggestion: this.wearableAdjustmentPrompt,
+          onWearableSuggestionConsumed: () => this.consumeWearableSuggestion(),
           onApplyStep: (step: AiPlanStep, conversationId: string) =>
             this.applyAiPlanStep(step, conversationId),
           onStartStep: (step: AiPlanStep, conversationId: string) =>
@@ -1252,6 +1289,7 @@ struct Index {
           },
           onSoundPreview: (sound: string) => this.playSelectedSound(sound),
           onAmbientPreview: (ambient: string) => this.previewAmbient(ambient),
+          onOpenWearableLab: () => this.openWearableLab(),
           onSaved: async () => {
             await this.onNavigateToTimer();
             this.currentTabIndex = 0;
@@ -1273,6 +1311,24 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.background'))
+
+    if (this.showWearableLab) {
+      WearableLab({
+        remainingSeconds: this.remainingSeconds,
+        totalSeconds: this.totalSeconds,
+        isRunning: this.isRunning,
+        isWorkMode: this.isWorkMode,
+        currentTask: this.currentTask,
+        onClose: () => this.closeWearableLab(),
+        onStartPause: () => this.onStartPause(),
+        onSkip: () => this.skipFromWearable(),
+        onPauseForRecovery: () => this.pauseForWearableRecovery(),
+        onSendToAgent: (prompt: string) => this.openAgentWithWearableSuggestion(prompt)
+      })
+    }
+    }
+    .width('100%')
+    .height('100%')
   }
 }
 

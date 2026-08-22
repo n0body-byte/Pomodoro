@@ -52,6 +52,7 @@ export struct AiPlanner {
   @Prop currentTaskCompleted: number = 0;
   @Prop currentTaskSource: string = 'manual';
   @Prop currentTaskConversationId: string = '';
+  @Prop @Watch('onWearableSuggestionChange') wearableSuggestion: string = '';
   @State serviceMode: string = 'deepseek';
   @State apiKey: string = '';
   @State deepSeekModel: string = 'deepseek-v4-flash';
@@ -103,6 +104,7 @@ export struct AiPlanner {
   @State consumedTokens: number = 0;
   onApplyStep?: (step: AiPlanStep, conversationId: string) => void;
   onStartStep?: (step: AiPlanStep, conversationId: string) => void;
+  onWearableSuggestionConsumed?: () => void;
 
   private examples: string[] = [
     '今晚复习两章高数并完成课后题',
@@ -110,6 +112,23 @@ export struct AiPlanner {
     '用两个小时整理本周工作并规划下周'
   ];
   private isRestoringContinuation: boolean = false;
+
+  private onWearableSuggestionChange(): void {
+    const suggestion = this.wearableSuggestion.trim();
+    if (suggestion.length === 0) {
+      return;
+    }
+    if (this.planSteps.length > 0) {
+      this.followUp = suggestion;
+      this.successMessage = '已接收穿戴端摘要，请确认后发送给 Agent';
+    } else {
+      this.goal = suggestion;
+      this.successMessage = '已接收穿戴端摘要，请补充目标或直接生成计划';
+    }
+    if (this.onWearableSuggestionConsumed) {
+      this.onWearableSuggestionConsumed();
+    }
+  }
 
   async aboutToAppear(): Promise<void> {
     this.endpoint = await PreferencesHelper.loadAiServiceEndpoint(this.getContext());

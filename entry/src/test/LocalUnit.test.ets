@@ -17,6 +17,11 @@ import { AiRequestTraceHelper } from '../main/ets/utils/AiRequestTraceHelper';
 import { AiDeadlineHelper } from '../main/ets/utils/AiDeadlineHelper';
 import { AiTokenBudgetHelper } from '../main/ets/utils/AiTokenBudgetHelper';
 import {
+  MockHeartRateProvider,
+  WearableHealthHelper,
+  WearableHealthSnapshot
+} from '../main/ets/utils/WearableHealthHelper';
+import {
   AiAgentResult,
   AiAgentState,
   AiChatMessage,
@@ -61,6 +66,44 @@ export default function localUnitTest() {
       expect(TimerHelper.calculateRemainingSeconds(5001, 5000)).assertEqual(1);
       expect(TimerHelper.calculateRemainingSeconds(5999, 5000)).assertEqual(1);
       expect(TimerHelper.calculateRemainingSeconds(6001, 5000)).assertEqual(2);
+    });
+
+    it('wearableStressSuggestsRecovery', 0, () => {
+      const provider = new MockHeartRateProvider();
+      provider.setScenario('stress');
+      const snapshot = provider.nextSnapshot(0, 1000);
+      const recommendation = WearableHealthHelper.evaluate(snapshot);
+      expect(recommendation.level).assertEqual('recover');
+      expect(recommendation.canAdjustPlan).assertTrue();
+    });
+
+    it('wearableMovementDoesNotAutoTreatAsStress', 0, () => {
+      const provider = new MockHeartRateProvider();
+      provider.setScenario('movement');
+      const recommendation = WearableHealthHelper.evaluate(provider.nextSnapshot(0, 1000));
+      expect(recommendation.level).assertEqual('observe');
+      expect(recommendation.description.indexOf('活动') >= 0).assertTrue();
+    });
+
+    it('wearableDisconnectedBlocksPlanAdjustment', 0, () => {
+      const provider = new MockHeartRateProvider();
+      provider.setScenario('disconnected');
+      const recommendation = WearableHealthHelper.evaluate(provider.nextSnapshot(0, 1000));
+      expect(recommendation.level).assertEqual('unavailable');
+      expect(recommendation.canAdjustPlan).assertFalse();
+    });
+
+    it('wearableAgentPromptContainsOnlyAggregateSummary', 0, () => {
+      const snapshot: WearableHealthSnapshot = {
+        bpm: 106, medianBpm: 103, baselineBpm: 75, trendBpm: 11,
+        highLoadSeconds: 150, sampleCount: 30, quality: 'good',
+        hasMotion: false, isWorn: true, sampledAt: 1000
+      };
+      const recommendation = WearableHealthHelper.evaluate(snapshot);
+      const prompt = WearableHealthHelper.buildAgentPrompt(snapshot, recommendation, '完成技术方案');
+      expect(prompt.indexOf('窗口心率中位数 103 BPM') >= 0).assertTrue();
+      expect(prompt.indexOf('不要作医学判断') >= 0).assertTrue();
+      expect(prompt.indexOf('106') < 0).assertTrue();
     });
 
     it('completedWorkRecordCompatibility', 0, () => {

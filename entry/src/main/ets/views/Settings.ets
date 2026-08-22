@@ -26,6 +26,7 @@ export struct Settings {
   onAmbientVolumeChange?: (volume: number) => void;
   onSoundPreview?: (sound: string) => void;
   onAmbientPreview?: (ambient: string) => void;
+  onOpenWearableLab?: () => void;
 
   async aboutToAppear(): Promise<void> {
     try {
@@ -302,6 +303,37 @@ export struct Settings {
           .backgroundColor($r('app.color.surface'))
           .border({ width: 1, color: $r('app.color.card_border') })
           .borderRadius(18)
+          .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
+
+          Column({ space: 12 }) {
+            Row({ space: 12 }) {
+              Stack({ alignContent: Alignment.Center }) {
+                Text('♥').fontSize(20).fontColor($r('app.color.primary_red'))
+              }
+              .width(46).height(46).borderRadius(23)
+              .backgroundColor($r('app.color.ring_track'))
+
+              Column({ space: 3 }) {
+                Text('穿戴协同实验室')
+                  .fontSize(17).fontWeight(FontWeight.Bold)
+                  .fontColor($r('app.color.text_primary')).width('100%')
+                Text('没有真机也能验证手表控制、心率规则和 Agent 调整链路')
+                  .fontSize(10).lineHeight(15)
+                  .fontColor($r('app.color.text_tertiary')).width('100%')
+              }.layoutWeight(1)
+            }.width('100%')
+
+            Button('打开虚拟手表')
+              .width('100%').height(40).fontSize(12).fontWeight(FontWeight.Bold)
+              .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(20)
+              .onClick(() => {
+                if (this.onOpenWearableLab) {
+                  this.onOpenWearableLab();
+                }
+              })
+          }
+          .width('100%').padding(16).backgroundColor($r('app.color.surface'))
+          .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(18)
           .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
 
           Column({ space: 14 }) {
