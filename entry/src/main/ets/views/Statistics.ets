@@ -161,6 +161,29 @@ export struct Statistics {
       `${this.focusInsight.averageFocusRating}/5` : '待复盘';
   }
 
+  private getTrendLabel(): string {
+    if (this.focusInsight.trendStatus === 'new') return '开始积累';
+    if (this.focusInsight.trendStatus === 'steady') return '基本持平';
+    if (this.focusInsight.trendStatus === 'up') return `↑ ${this.focusInsight.trendPercent}%`;
+    if (this.focusInsight.trendStatus === 'down') return `↓ ${Math.abs(this.focusInsight.trendPercent)}%`;
+    return '暂无';
+  }
+
+  private getTrendColor(): ResourceColor {
+    if (this.focusInsight.trendStatus === 'up' || this.focusInsight.trendStatus === 'new') {
+      return $r('app.color.primary_green');
+    }
+    if (this.focusInsight.trendStatus === 'down') {
+      return $r('app.color.primary_red');
+    }
+    return $r('app.color.accent_yellow');
+  }
+
+  private getCoverageColor(): ResourceColor {
+    return this.focusInsight.reflectionCoveragePercent >= 60 ?
+      $r('app.color.primary_green') : $r('app.color.accent_yellow');
+  }
+
   @Builder
   private insightMetric(label: string, value: string, color: ResourceColor) {
     Column({ space: 3 }) {
@@ -168,6 +191,17 @@ export struct Statistics {
       Text(value).fontSize(15).fontWeight(FontWeight.Bold).fontColor(color)
     }
     .layoutWeight(1).alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  private insightQualityMetric(label: string, value: string, description: string, color: ResourceColor) {
+    Column({ space: 3 }) {
+      Text(label).fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+      Text(value).fontSize(13).fontWeight(FontWeight.Bold).fontColor(color).width('100%')
+      Text(description).fontSize(8).fontColor($r('app.color.text_tertiary')).width('100%')
+    }
+    .layoutWeight(1).alignItems(HorizontalAlign.Start)
+    .padding(9).backgroundColor($r('app.color.ring_track')).borderRadius(9)
   }
 
   build() {
@@ -240,6 +274,14 @@ export struct Statistics {
               this.insightMetric('高效时段', this.focusInsight.bestPeriod, $r('app.color.primary_green'))
               this.insightMetric('估时准确', this.getAccuracyLabel(), $r('app.color.accent_yellow'))
               this.insightMetric('平均专注', this.getFocusLabel(), $r('app.color.primary_red'))
+            }.width('100%')
+            Row({ space: 8 }) {
+              this.insightQualityMetric('近 7 天趋势', this.getTrendLabel(),
+                `${this.getTotalLabel(this.focusInsight.recentWorkSeconds)} · 前期 ${this.getTotalLabel(this.focusInsight.previousWorkSeconds)}`,
+                this.getTrendColor())
+              this.insightQualityMetric('复盘覆盖', `${this.focusInsight.reflectionCoveragePercent}%`,
+                `${this.focusInsight.reflectedSessions}/${this.focusInsight.workSessions} 条专注记录`,
+                this.getCoverageColor())
             }.width('100%')
             if (this.focusInsight.topInterruption !== '暂无') {
               Text(`主要打断：${this.focusInsight.topInterruption}`)

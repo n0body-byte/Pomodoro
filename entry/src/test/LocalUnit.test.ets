@@ -940,5 +940,33 @@ export default function localUnitTest() {
       expect(insight.averageFocusRating).assertEqual(2);
       expect(insight.actionTitle).assertEqual('缩短下一轮并明确交付');
     });
+
+    it('focusInsightComparesRecentSevenDayWindows', 0, () => {
+      const now = new Date(2026, 7, 22, 12, 0).getTime();
+      const records: FocusInsightRecord[] = [
+        { workSeconds: 1200, completedAt: now - 24 * 60 * 60 * 1000, type: 'work' },
+        { workSeconds: 600, completedAt: now - 3 * 24 * 60 * 60 * 1000, type: 'work' },
+        { workSeconds: 900, completedAt: now - 9 * 24 * 60 * 60 * 1000, type: 'work' },
+        { workSeconds: 300, completedAt: now - 2 * 24 * 60 * 60 * 1000, type: 'break' }
+      ];
+      const insight = FocusInsightHelper.analyze(records, now);
+      expect(insight.recentWorkSeconds).assertEqual(1800);
+      expect(insight.previousWorkSeconds).assertEqual(900);
+      expect(insight.trendStatus).assertEqual('up');
+      expect(insight.trendPercent).assertEqual(100);
+    });
+
+    it('focusInsightWarnsWhenReflectionCoverageIsLow', 0, () => {
+      const records: FocusInsightRecord[] = [
+        { workSeconds: 1500, completedAt: 100, type: 'work',
+          focusRating: 4, energyRating: 4, interruptionReason: '无' },
+        { workSeconds: 1500, completedAt: 200, type: 'work' },
+        { workSeconds: 1500, completedAt: 300, type: 'work' },
+        { workSeconds: 1500, completedAt: 400, type: 'work' }
+      ];
+      const insight = FocusInsightHelper.analyze(records, 500);
+      expect(insight.reflectionCoveragePercent).assertEqual(25);
+      expect(insight.actionTitle).assertEqual('连续完成 3 次轻量复盘');
+    });
   });
 }

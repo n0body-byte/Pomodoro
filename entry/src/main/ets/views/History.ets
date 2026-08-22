@@ -17,12 +17,19 @@ export struct History {
   @State errorText: string = '';
   @State searchText: string = '';
   @State selectedFilter: string = 'all';
+  @State editReflectionEnabled: boolean = false;
+  @State editFocusRating: number = 3;
+  @State editEnergyRating: number = 3;
+  @State editInterruptionReason: string = '无';
+  @State editOutcomeNote: string = '';
   @Prop canRepeatTask: boolean = true;
   onChanged?: () => void;
   onRepeatTask?: (record: SessionRecord) => void;
   private editOriginal: SessionRecord | null = null;
   private filterKeys: string[] = ['all', 'work', 'break', 'completed', 'partial', 'reviewed'];
   private filterLabels: string[] = ['全部', '专注', '休息', '已完成', '部分', '已复盘'];
+  private ratingValues: number[] = [1, 2, 3, 4, 5];
+  private reflectionReasons: string[] = ['无', '通知消息', '环境打断', '任务卡住', '身体不适'];
 
   async aboutToAppear(): Promise<void> {
     await this.refresh();
@@ -75,6 +82,11 @@ export struct History {
     this.editTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     this.editMinutes = 25;
     this.editIsBreak = false;
+    this.editReflectionEnabled = false;
+    this.editFocusRating = 3;
+    this.editEnergyRating = 3;
+    this.editInterruptionReason = '无';
+    this.editOutcomeNote = '';
     this.errorText = '';
     this.showEditor = true;
   }
@@ -89,6 +101,14 @@ export struct History {
     this.editTime = this.formatTime(record.completedAt);
     this.editMinutes = Math.max(1, Math.round(record.workSeconds / 60));
     this.editIsBreak = record.type === 'break';
+    this.editReflectionEnabled = record.type !== 'break' &&
+      record.focusRating !== undefined && record.energyRating !== undefined;
+    this.editFocusRating = record.focusRating !== undefined ?
+      Math.max(1, Math.min(5, Math.round(record.focusRating))) : 3;
+    this.editEnergyRating = record.energyRating !== undefined ?
+      Math.max(1, Math.min(5, Math.round(record.energyRating))) : 3;
+    this.editInterruptionReason = record.interruptionReason || '无';
+    this.editOutcomeNote = record.outcomeNote || '';
     this.errorText = '';
     this.showEditor = true;
   }
@@ -122,6 +142,7 @@ export struct History {
       return;
     }
     const original = this.editOriginal;
+    const savesReflection = !this.editIsBreak && this.editReflectionEnabled;
     const record: SessionRecord = {
       id: original !== null ? (original.id || this.recordKey(original)) : `manual-${Date.now()}`,
       date: this.editDate,
@@ -136,11 +157,12 @@ export struct History {
       tag: this.editTag.trim(),
       note: this.editNote.trim(),
       source: original !== null ? original.source || 'timer' : 'manual',
-      focusRating: original !== null ? original.focusRating : undefined,
-      energyRating: original !== null ? original.energyRating : undefined,
-      interruptionReason: original !== null ? original.interruptionReason : undefined,
-      outcomeNote: original !== null ? original.outcomeNote : undefined,
-      reflectedAt: original !== null ? original.reflectedAt : undefined
+      focusRating: savesReflection ? this.editFocusRating : undefined,
+      energyRating: savesReflection ? this.editEnergyRating : undefined,
+      interruptionReason: savesReflection ? this.editInterruptionReason : undefined,
+      outcomeNote: savesReflection ? this.editOutcomeNote.trim() : undefined,
+      reflectedAt: savesReflection ?
+        (original !== null && original.reflectedAt !== undefined ? original.reflectedAt : Date.now()) : undefined
     };
     await PreferencesHelper.updateSessionRecord(this.getContext(), record);
     this.showEditor = false;
@@ -184,6 +206,29 @@ export struct History {
       .onClick(() => this.selectedFilter = key)
   }
 
+  @Builder
+  private ratingEditor(label: string, selected: number, focusRating: boolean) {
+    Column({ space: 6 }) {
+      Text(`${label} · ${selected}/5`).fontSize(11).fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_secondary')).width('100%')
+      Row({ space: 6 }) {
+        ForEach(this.ratingValues, (value: number) => {
+          Button(`${value}`).layoutWeight(1).height(30).fontSize(10).borderRadius(15)
+            .backgroundColor(value === selected ? $r('app.color.primary_green') :
+              $r('app.color.ring_track'))
+            .fontColor(value === selected ? Color.Black : $r('app.color.text_secondary'))
+            .onClick(() => {
+              if (focusRating) {
+                this.editFocusRating = value;
+              } else {
+                this.editEnergyRating = value;
+              }
+            })
+        }, (value: number) => `${label}-${value}`)
+      }.width('100%')
+    }.width('100%')
+  }
+
   build() {
     Column() {
       Row() {
@@ -202,88 +247,132 @@ export struct History {
       .width('100%')
       .padding({ left: 12, right: 12, top: 8, bottom: 12 })
 
-      Column({ space: 8 }) {
-        TextInput({ text: this.searchText, placeholder: '搜索任务、项目、标签或产出' })
-          .height(38).fontSize(12).borderRadius(14)
-          .backgroundColor($r('app.color.surface'))
-          .onChange((value: string) => this.searchText = value.substring(0, 80))
-        Scroll() {
-          Row({ space: 7 }) {
-            ForEach(this.filterKeys, (key: string, index: number) => {
-              this.filterChip(this.filterLabels[index], key)
-            }, (key: string) => key)
+      if (!this.showEditor) {
+        Column({ space: 8 }) {
+          TextInput({ text: this.searchText, placeholder: '搜索任务、项目、标签或产出' })
+            .height(38).fontSize(12).borderRadius(14)
+            .backgroundColor($r('app.color.surface'))
+            .onChange((value: string) => this.searchText = value.substring(0, 80))
+          Scroll() {
+            Row({ space: 7 }) {
+              ForEach(this.filterKeys, (key: string, index: number) => {
+                this.filterChip(this.filterLabels[index], key)
+              }, (key: string) => key)
+            }
           }
+          .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+          .width('100%')
         }
-        .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
-        .width('100%')
+        .width('100%').padding({ left: 10, right: 10, bottom: 10 })
       }
-      .width('100%').padding({ left: 10, right: 10, bottom: 10 })
 
       if (this.showEditor) {
-        Column({ space: 10 }) {
-          Row() {
-            Text(this.editOriginal === null ? '补记专注' : '编辑记录')
-              .fontSize(16).fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.text_primary'))
-            Blank()
-            Button(this.editIsBreak ? '休息' : '专注')
-              .height(30).fontSize(12).borderRadius(15)
-              .fontColor(Color.White)
-              .backgroundColor(this.editIsBreak ? $r('app.color.primary_green') : $r('app.color.primary_red'))
-              .onClick(() => this.editIsBreak = !this.editIsBreak)
+        Scroll() {
+          Column({ space: 10 }) {
+            Row() {
+              Text(this.editOriginal === null ? '补记专注' : '编辑记录')
+                .fontSize(16).fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary'))
+              Blank()
+              Button(this.editIsBreak ? '休息' : '专注')
+                .height(30).fontSize(12).borderRadius(15).fontColor(Color.White)
+                .backgroundColor(this.editIsBreak ?
+                  $r('app.color.primary_green') : $r('app.color.primary_red'))
+                .onClick(() => this.editIsBreak = !this.editIsBreak)
+            }
+            TextInput({ text: this.editTask, placeholder: '任务名称' })
+              .height(40).backgroundColor($r('app.color.ring_track'))
+              .onChange((value: string) => this.editTask = value.substring(0, 80))
+            Row({ space: 8 }) {
+              TextInput({ text: this.editProject, placeholder: '项目' })
+                .layoutWeight(1).height(40).backgroundColor($r('app.color.ring_track'))
+                .onChange((value: string) => this.editProject = value.substring(0, 40))
+              TextInput({ text: this.editTag, placeholder: '标签' })
+                .layoutWeight(1).height(40).backgroundColor($r('app.color.ring_track'))
+                .onChange((value: string) => this.editTag = value.substring(0, 30))
+            }
+            TextInput({ text: this.editNote, placeholder: '备注' })
+              .height(40).backgroundColor($r('app.color.ring_track'))
+              .onChange((value: string) => this.editNote = value.substring(0, 120))
+            Row({ space: 8 }) {
+              TextInput({ text: this.editDate, placeholder: 'YYYY-MM-DD' })
+                .layoutWeight(1).height(40).backgroundColor($r('app.color.ring_track'))
+                .onChange((value: string) => this.editDate = value.substring(0, 10))
+              TextInput({ text: this.editTime, placeholder: 'HH:MM' })
+                .width(105).height(40).backgroundColor($r('app.color.ring_track'))
+                .onChange((value: string) => this.editTime = value.substring(0, 5))
+            }
+            Row() {
+              Text('时长').fontSize(13).fontColor($r('app.color.text_secondary'))
+              Blank()
+              Button('-5').height(30).backgroundColor($r('app.color.ring_track'))
+                .fontColor($r('app.color.text_secondary'))
+                .onClick(() => this.editMinutes = Math.max(1, this.editMinutes - 5))
+              Text(`${this.editMinutes} 分钟`).width(82).textAlign(TextAlign.Center)
+                .fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
+              Button('+5').height(30).backgroundColor($r('app.color.ring_track'))
+                .fontColor($r('app.color.text_secondary'))
+                .onClick(() => this.editMinutes = Math.min(240, this.editMinutes + 5))
+            }
+
+            if (!this.editIsBreak) {
+              Column({ space: 9 }) {
+                Row() {
+                  Column({ space: 2 }) {
+                    Text('轻量复盘').fontSize(13).fontWeight(FontWeight.Bold)
+                      .fontColor($r('app.color.text_primary')).width('100%')
+                    Text('可补充或修正统计洞察使用的反馈')
+                      .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+                  }.layoutWeight(1)
+                  Button(this.editReflectionEnabled ? '移除复盘' : '+ 添加复盘')
+                    .height(30).fontSize(10).borderRadius(15)
+                    .backgroundColor($r('app.color.ring_track'))
+                    .fontColor(this.editReflectionEnabled ?
+                      $r('app.color.primary_red') : $r('app.color.primary_green'))
+                    .onClick(() => this.editReflectionEnabled = !this.editReflectionEnabled)
+                }.width('100%')
+                if (this.editReflectionEnabled) {
+                  this.ratingEditor('专注程度', this.editFocusRating, true)
+                  this.ratingEditor('精力状态', this.editEnergyRating, false)
+                  Text('主要打断').fontSize(11).fontWeight(FontWeight.Bold)
+                    .fontColor($r('app.color.text_secondary')).width('100%')
+                  Scroll() {
+                    Row({ space: 6 }) {
+                      ForEach(this.reflectionReasons, (reason: string) => {
+                        Button(reason).height(30).fontSize(9).borderRadius(15)
+                          .backgroundColor(reason === this.editInterruptionReason ?
+                            $r('app.color.primary_green') : $r('app.color.ring_track'))
+                          .fontColor(reason === this.editInterruptionReason ? Color.Black :
+                            $r('app.color.text_secondary'))
+                          .onClick(() => this.editInterruptionReason = reason)
+                      }, (reason: string) => reason)
+                    }
+                  }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
+                  TextArea({ text: this.editOutcomeNote, placeholder: '这轮实际完成了什么？' })
+                    .height(70).fontSize(11).backgroundColor($r('app.color.ring_track'))
+                    .onChange((value: string) => this.editOutcomeNote = value.substring(0, 200))
+                }
+              }
+              .width('100%').padding(10).backgroundColor($r('app.color.background')).borderRadius(12)
+            }
+
+            if (this.errorText !== '') {
+              Text(this.errorText).fontSize(11).fontColor($r('app.color.primary_red'))
+            }
+            Row({ space: 10 }) {
+              Button('取消').layoutWeight(1).height(38)
+                .backgroundColor($r('app.color.ring_track'))
+                .fontColor($r('app.color.text_secondary'))
+                .onClick(() => this.showEditor = false)
+              Button('保存').layoutWeight(1).height(38)
+                .backgroundColor($r('app.color.primary_red')).fontColor(Color.White)
+                .onClick(() => this.saveEditor())
+            }
           }
-          TextInput({ text: this.editTask, placeholder: '任务名称' })
-            .height(40).backgroundColor($r('app.color.ring_track'))
-            .onChange((value: string) => this.editTask = value)
-          Row({ space: 8 }) {
-            TextInput({ text: this.editProject, placeholder: '项目' })
-              .layoutWeight(1).height(40).backgroundColor($r('app.color.ring_track'))
-              .onChange((value: string) => this.editProject = value)
-            TextInput({ text: this.editTag, placeholder: '标签' })
-              .layoutWeight(1).height(40).backgroundColor($r('app.color.ring_track'))
-              .onChange((value: string) => this.editTag = value)
-          }
-          TextInput({ text: this.editNote, placeholder: '备注' })
-            .height(40).backgroundColor($r('app.color.ring_track'))
-            .onChange((value: string) => this.editNote = value)
-          TextInput({ text: this.editDate, placeholder: 'YYYY-MM-DD' })
-            .height(40).backgroundColor($r('app.color.ring_track'))
-            .onChange((value: string) => this.editDate = value)
-          TextInput({ text: this.editTime, placeholder: 'HH:MM（结束时间）' })
-            .height(40).backgroundColor($r('app.color.ring_track'))
-            .onChange((value: string) => this.editTime = value)
-          Row() {
-            Text('时长')
-              .fontSize(13).fontColor($r('app.color.text_secondary'))
-            Blank()
-            Button('-5').height(30).backgroundColor($r('app.color.ring_track'))
-              .fontColor($r('app.color.text_secondary'))
-              .onClick(() => this.editMinutes = Math.max(1, this.editMinutes - 5))
-            Text(`${this.editMinutes} 分钟`)
-              .width(82).textAlign(TextAlign.Center)
-              .fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
-            Button('+5').height(30).backgroundColor($r('app.color.ring_track'))
-              .fontColor($r('app.color.text_secondary'))
-              .onClick(() => this.editMinutes = Math.min(240, this.editMinutes + 5))
-          }
-          if (this.errorText !== '') {
-            Text(this.errorText).fontSize(11).fontColor($r('app.color.primary_red'))
-          }
-          Row({ space: 10 }) {
-            Button('取消').layoutWeight(1).height(38)
-              .backgroundColor($r('app.color.ring_track'))
-              .fontColor($r('app.color.text_secondary'))
-              .onClick(() => this.showEditor = false)
-            Button('保存').layoutWeight(1).height(38)
-              .backgroundColor($r('app.color.primary_red'))
-              .fontColor(Color.White)
-              .onClick(() => this.saveEditor())
-          }
+          .width('100%').padding(14).backgroundColor($r('app.color.surface')).borderRadius(16)
         }
-        .padding(14)
-        .margin({ left: 10, right: 10, bottom: 10 })
-        .backgroundColor($r('app.color.surface'))
-        .borderRadius(16)
+        .layoutWeight(1).width('100%').scrollBar(BarState.Off)
+        .padding({ left: 10, right: 10, bottom: 10 })
       }
 
       if (this.records.length === 0 && !this.showEditor) {
@@ -307,7 +396,7 @@ export struct History {
             })
         }
         .layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-      } else {
+      } else if (!this.showEditor) {
         List({ space: 8 }) {
           ForEach(this.getFilteredRecords(), (record: SessionRecord) => {
             ListItem() {
