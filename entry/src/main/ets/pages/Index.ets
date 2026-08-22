@@ -3,7 +3,7 @@ import { CircularProgress } from '../components/CircularProgress';
 import { TimerControls } from '../components/TimerControls';
 import { CelebrationOverlay } from '../components/CelebrationOverlay';
 import { WearableLab } from '../components/WearableLab';
-import { PreferencesHelper, SessionFeedback, TaskContext } from '../utils/PreferencesHelper';
+import { PreferencesHelper, SessionFeedback, SessionRecord, TaskContext } from '../utils/PreferencesHelper';
 import { SoundHelper } from '../utils/SoundHelper';
 import { AmbientHelper } from '../utils/AmbientHelper';
 import { NotificationHelper } from '../utils/NotificationHelper';
@@ -279,6 +279,42 @@ struct Index {
       agentConversationId: conversationId
     });
     this.currentTaskCompleted = 0;
+    this.currentTabIndex = 0;
+    this.tabsController.changeIndex(0);
+  }
+
+  private async repeatHistoryTask(record: SessionRecord): Promise<void> {
+    if (!TimerPlanHelper.canHandoffAiStep(
+      this.isRunning, this.remainingSeconds, this.totalSeconds) ||
+      record.type === 'break' || record.task === undefined || record.task.trim().length === 0) {
+      return;
+    }
+    if (!this.isWorkMode) {
+      this.switchToWork();
+    }
+    this.currentTask = record.task.trim();
+    this.currentProject = (record.project || '').trim();
+    this.currentTag = (record.tag || '').trim();
+    this.currentNote = (record.note || '').trim();
+    const plannedSeconds = record.plannedSeconds !== undefined && record.plannedSeconds > 0 ?
+      record.plannedSeconds : record.workSeconds;
+    this.estimatedPomodoros = Math.max(1, Math.min(20,
+      Math.round(plannedSeconds / Math.max(1, this.workDuration))));
+    this.currentTaskCompleted = 0;
+    this.taskTrackingStartedAt = Date.now();
+    this.currentTaskSource = 'manual';
+    this.currentTaskConversationId = '';
+    this.dismissAiStepHandoff();
+    await PreferencesHelper.saveTaskContext(this.getContext(), {
+      task: this.currentTask,
+      project: this.currentProject,
+      tag: this.currentTag,
+      note: this.currentNote,
+      estimatedPomodoros: this.estimatedPomodoros,
+      trackingStartedAt: this.taskTrackingStartedAt,
+      source: 'manual',
+      agentConversationId: ''
+    });
     this.currentTabIndex = 0;
     this.tabsController.changeIndex(0);
   }
@@ -1549,7 +1585,10 @@ struct Index {
       TabContent() {
         Insights({
           active: this.currentTabIndex === 2,
-          onHistoryChanged: () => this.loadTodayStats()
+          canRepeatTask: TimerPlanHelper.canHandoffAiStep(
+            this.isRunning, this.remainingSeconds, this.totalSeconds),
+          onHistoryChanged: () => this.loadTodayStats(),
+          onRepeatTask: (record: SessionRecord) => this.repeatHistoryTask(record)
         })
       }
       .tabBar(this.tabBarInsights)

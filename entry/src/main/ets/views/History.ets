@@ -15,8 +15,14 @@ export struct History {
   @State editIsBreak: boolean = false;
   @State pendingDeleteKey: string = '';
   @State errorText: string = '';
+  @State searchText: string = '';
+  @State selectedFilter: string = 'all';
+  @Prop canRepeatTask: boolean = true;
   onChanged?: () => void;
+  onRepeatTask?: (record: SessionRecord) => void;
   private editOriginal: SessionRecord | null = null;
+  private filterKeys: string[] = ['all', 'work', 'break', 'completed', 'partial', 'reviewed'];
+  private filterLabels: string[] = ['全部', '专注', '休息', '已完成', '部分', '已复盘'];
 
   async aboutToAppear(): Promise<void> {
     await this.refresh();
@@ -36,6 +42,17 @@ export struct History {
     const history = await PreferencesHelper.loadSessionHistory(this.getContext());
     this.records = history.slice().sort((a: SessionRecord, b: SessionRecord) =>
       b.completedAt - a.completedAt);
+  }
+
+  private getFilteredRecords(): SessionRecord[] {
+    return PreferencesHelper.filterSessionRecords(this.records, this.searchText, this.selectedFilter);
+  }
+
+  private repeatRecord(record: SessionRecord): void {
+    this.pendingDeleteKey = '';
+    if (this.canRepeatTask && this.onRepeatTask !== undefined) {
+      this.onRepeatTask(record);
+    }
   }
 
   private todayString(): string {
@@ -156,6 +173,17 @@ export struct History {
     return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
   }
 
+  @Builder
+  private filterChip(label: string, key: string) {
+    Button(label)
+      .height(30).fontSize(10).borderRadius(15)
+      .fontWeight(this.selectedFilter === key ? FontWeight.Bold : FontWeight.Medium)
+      .fontColor(this.selectedFilter === key ? Color.White : $r('app.color.text_secondary'))
+      .backgroundColor(this.selectedFilter === key ? $r('app.color.primary_red') :
+        $r('app.color.ring_track'))
+      .onClick(() => this.selectedFilter = key)
+  }
+
   build() {
     Column() {
       Row() {
@@ -173,6 +201,23 @@ export struct History {
       }
       .width('100%')
       .padding({ left: 12, right: 12, top: 8, bottom: 12 })
+
+      Column({ space: 8 }) {
+        TextInput({ text: this.searchText, placeholder: '搜索任务、项目、标签或产出' })
+          .height(38).fontSize(12).borderRadius(14)
+          .backgroundColor($r('app.color.surface'))
+          .onChange((value: string) => this.searchText = value.substring(0, 80))
+        Scroll() {
+          Row({ space: 7 }) {
+            ForEach(this.filterKeys, (key: string, index: number) => {
+              this.filterChip(this.filterLabels[index], key)
+            }, (key: string) => key)
+          }
+        }
+        .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+        .width('100%')
+      }
+      .width('100%').padding({ left: 10, right: 10, bottom: 10 })
 
       if (this.showEditor) {
         Column({ space: 10 }) {
@@ -248,9 +293,23 @@ export struct History {
             .fontSize(12).fontColor($r('app.color.text_tertiary'))
         }
         .layoutWeight(1).justifyContent(FlexAlign.Center)
+      } else if (this.getFilteredRecords().length === 0 && !this.showEditor) {
+        Column({ space: 8 }) {
+          Text('没有匹配的记录').fontSize(16).fontColor($r('app.color.text_secondary'))
+          Text('换一个关键词或筛选条件试试')
+            .fontSize(12).fontColor($r('app.color.text_tertiary'))
+          Button('清除筛选').height(34).fontSize(11).borderRadius(17)
+            .backgroundColor($r('app.color.ring_track'))
+            .fontColor($r('app.color.text_secondary'))
+            .onClick(() => {
+              this.searchText = '';
+              this.selectedFilter = 'all';
+            })
+        }
+        .layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
       } else {
         List({ space: 8 }) {
-          ForEach(this.records, (record: SessionRecord) => {
+          ForEach(this.getFilteredRecords(), (record: SessionRecord) => {
             ListItem() {
               Column({ space: 8 }) {
                 Row() {
@@ -293,6 +352,14 @@ export struct History {
                     .padding(8).backgroundColor($r('app.color.ring_track')).borderRadius(8)
                 }
                 Row({ space: 8 }) {
+                  if (record.type !== 'break' && record.task !== undefined && record.task.length > 0) {
+                    Button('再来一次').height(28).fontSize(11)
+                      .backgroundColor($r('app.color.primary_green'))
+                      .fontColor(Color.Black)
+                      .opacity(this.canRepeatTask ? 1 : 0.45)
+                      .enabled(this.canRepeatTask)
+                      .onClick(() => this.repeatRecord(record))
+                  }
                   Blank()
                   Button('编辑').height(28).fontSize(11)
                     .backgroundColor($r('app.color.ring_track'))

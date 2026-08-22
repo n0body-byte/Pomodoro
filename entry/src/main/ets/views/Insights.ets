@@ -1,12 +1,15 @@
 import { Statistics } from './Statistics';
 import { History } from './History';
 import { Achievements } from './Achievements';
+import { SessionRecord } from '../utils/PreferencesHelper';
 
 @Component
 export struct Insights {
   @Prop active: boolean = false;
   @State selectedSection: number = 0;
+  @Prop canRepeatTask: boolean = true;
   onHistoryChanged?: () => void;
+  onRepeatTask?: (record: SessionRecord) => void;
 
   @Builder
   sectionButton(label: string, index: number) {
@@ -43,9 +46,15 @@ export struct Insights {
         } else if (this.selectedSection === 1) {
           History({
             active: this.active,
+            canRepeatTask: this.canRepeatTask,
             onChanged: () => {
               if (this.onHistoryChanged !== undefined) {
                 this.onHistoryChanged();
+              }
+            },
+            onRepeatTask: (record: SessionRecord) => {
+              if (this.onRepeatTask !== undefined) {
+                this.onRepeatTask(record);
               }
             }
           })

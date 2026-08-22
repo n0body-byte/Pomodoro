@@ -209,6 +209,30 @@ export class PreferencesHelper {
     }
   }
 
+  static filterSessionRecords(records: SessionRecord[], query: string, filter: string): SessionRecord[] {
+    const keyword = query.trim().toLowerCase();
+    const result: SessionRecord[] = [];
+    for (const record of records) {
+      const isBreak = record.type === 'break';
+      let matchesFilter = filter === 'all';
+      if (filter === 'work') matchesFilter = !isBreak;
+      if (filter === 'break') matchesFilter = isBreak;
+      if (filter === 'completed') matchesFilter = record.status !== 'abandoned' && record.status !== 'skipped';
+      if (filter === 'partial') matchesFilter = record.status === 'abandoned' || record.status === 'skipped';
+      if (filter === 'reviewed') matchesFilter = record.focusRating !== undefined;
+      if (!matchesFilter) continue;
+      if (keyword.length === 0 || PreferencesHelper.sessionRecordSearchText(record).indexOf(keyword) >= 0) {
+        result.push(record);
+      }
+    }
+    return result;
+  }
+
+  private static sessionRecordSearchText(record: SessionRecord): string {
+    return (`${record.task || ''} ${record.project || ''} ${record.tag || ''} ${record.note || ''} ` +
+      `${record.outcomeNote || ''} ${record.interruptionReason || ''}`).toLowerCase();
+  }
+
   static applySessionFeedback(history: SessionRecord[], completedAt: number,
     feedback: SessionFeedback): boolean {
     for (let index = history.length - 1; index >= 0; index--) {

@@ -17,6 +17,7 @@ import { AiExecutionCheckInHelper } from '../main/ets/utils/AiExecutionCheckInHe
 import { AiRequestTraceHelper } from '../main/ets/utils/AiRequestTraceHelper';
 import { AiDeadlineHelper } from '../main/ets/utils/AiDeadlineHelper';
 import { AiTokenBudgetHelper } from '../main/ets/utils/AiTokenBudgetHelper';
+import { FocusInsightHelper, FocusInsightRecord } from '../main/ets/utils/FocusInsightHelper';
 import {
   HeartRateSample,
   MockHeartRateProvider,
@@ -894,6 +895,50 @@ export default function localUnitTest() {
       expect(history[0].interruptionReason).assertEqual('通知消息');
       expect(history[0].outcomeNote).assertEqual('完成大纲');
       expect(history[1].focusRating === undefined).assertTrue();
+    });
+
+    it('sessionHistoryFilterMatchesContentAndStatus', 0, () => {
+      const history: SessionRecord[] = [
+        { id: 'work-1', date: '2026-08-22', workSeconds: 900, completedAt: 100,
+          type: 'work', status: 'abandoned', task: '完成比赛说明文档', project: '鸿蒙复赛' },
+        { id: 'work-2', date: '2026-08-22', workSeconds: 1500, completedAt: 200,
+          type: 'work', status: 'completed', task: '修复界面', outcomeNote: '完成统计页' },
+        { id: 'break-1', date: '2026-08-22', workSeconds: 300, completedAt: 300,
+          type: 'break', status: 'completed' }
+      ];
+      expect(PreferencesHelper.filterSessionRecords(history, '鸿蒙', 'all').length).assertEqual(1);
+      expect(PreferencesHelper.filterSessionRecords(history, '统计页', 'completed').length).assertEqual(1);
+      expect(PreferencesHelper.filterSessionRecords(history, '', 'partial')[0].id).assertEqual('work-1');
+      expect(PreferencesHelper.filterSessionRecords(history, '', 'break').length).assertEqual(1);
+    });
+
+    it('focusInsightFindsBestPeriodAndTopInterruption', 0, () => {
+      const records: FocusInsightRecord[] = [
+        { workSeconds: 1500, plannedSeconds: 1500,
+          completedAt: new Date(2026, 7, 22, 9, 30).getTime(), type: 'work',
+          focusRating: 4, energyRating: 3, interruptionReason: '无' },
+        { workSeconds: 1200, plannedSeconds: 1500,
+          completedAt: new Date(2026, 7, 22, 10, 30).getTime(), type: 'work',
+          focusRating: 4, energyRating: 4, interruptionReason: '通知消息' },
+        { workSeconds: 600, plannedSeconds: 1500,
+          completedAt: new Date(2026, 7, 22, 20, 30).getTime(), type: 'work' }
+      ];
+      const insight = FocusInsightHelper.analyze(records);
+      expect(insight.bestPeriod).assertEqual('上午');
+      expect(insight.estimateAccuracyPercent).assertEqual(73);
+      expect(insight.topInterruption).assertEqual('通知消息');
+      expect(insight.actionTitle.indexOf('通知消息') >= 0).assertTrue();
+    });
+
+    it('focusInsightPrioritizesShorterSessionWhenFocusIsLow', 0, () => {
+      const records: FocusInsightRecord[] = [
+        { workSeconds: 600, plannedSeconds: 1500,
+          completedAt: new Date(2026, 7, 22, 14, 30).getTime(), type: 'work',
+          focusRating: 2, energyRating: 2, interruptionReason: '任务卡住' }
+      ];
+      const insight = FocusInsightHelper.analyze(records);
+      expect(insight.averageFocusRating).assertEqual(2);
+      expect(insight.actionTitle).assertEqual('缩短下一轮并明确交付');
     });
   });
 }

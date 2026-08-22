@@ -1429,6 +1429,28 @@ export struct AiPlanner {
     return count;
   }
 
+  private getWorkflowStage(): number {
+    if (this.needsReview || (this.planSteps.length > 0 &&
+      this.getCompletedStepCount() === this.planSteps.length)) {
+      return 3;
+    }
+    if (this.isLoading || this.pendingPlanSteps.length > 0) {
+      return 1;
+    }
+    if (this.planSteps.length > 0) {
+      return 2;
+    }
+    return 0;
+  }
+
+  private getWorkflowDescription(): string {
+    const stage = this.getWorkflowStage();
+    if (stage === 1) return '正在生成或确认可执行计划';
+    if (stage === 2) return '按步骤专注，完成后提交可核验产出';
+    if (stage === 3) return '用实际结果校准下一轮计划';
+    return '先写清目标、截止时间与可用时长';
+  }
+
   private hasCurrentConversation(): boolean {
     return this.chatMessages.length > 0 || this.planSteps.length > 0 || this.requestTraces.length > 0;
   }
@@ -1626,6 +1648,34 @@ export struct AiPlanner {
       .width(36).height(36).backgroundColor($r('app.color.ring_track')).borderRadius(18)
       .onClick(() => this.showServiceSettings = !this.showServiceSettings)
     }.width('100%')
+  }
+
+  @Builder
+  private workflowStageBar() {
+    Column({ space: 7 }) {
+      Row() {
+        ForEach(['目标', '计划', '执行', '复盘'], (label: string, index: number) => {
+          Column({ space: 4 }) {
+            Text(`${index + 1}`)
+              .width(24).height(24).textAlign(TextAlign.Center).fontSize(10)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(index <= this.getWorkflowStage() ? Color.Black :
+                $r('app.color.text_tertiary'))
+              .backgroundColor(index <= this.getWorkflowStage() ?
+                $r('app.color.primary_green') : $r('app.color.ring_track'))
+              .borderRadius(12)
+            Text(label).fontSize(9)
+              .fontWeight(index === this.getWorkflowStage() ? FontWeight.Bold : FontWeight.Medium)
+              .fontColor(index === this.getWorkflowStage() ? $r('app.color.text_primary') :
+                $r('app.color.text_tertiary'))
+          }.layoutWeight(1).alignItems(HorizontalAlign.Center)
+        }, (label: string) => label)
+      }.width('100%')
+      Text(this.getWorkflowDescription()).fontSize(9)
+        .fontColor($r('app.color.text_secondary')).width('100%').textAlign(TextAlign.Center)
+    }
+    .width('100%').padding({ left: 10, right: 10, top: 8, bottom: 8 })
+    .backgroundColor($r('app.color.surface')).borderRadius(14)
   }
 
   @Builder
@@ -2514,6 +2564,7 @@ export struct AiPlanner {
     Stack({ alignContent: Alignment.Top }) {
       Column({ space: 12 }) {
         this.pageHeader()
+        this.workflowStageBar()
         Scroll() {
           GridRow({
             columns: { xs: 4, sm: 12 },
