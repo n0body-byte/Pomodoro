@@ -94,6 +94,11 @@ export struct AiPlanner {
   @State autoReviewEnabled: boolean = false;
   @State lastAutoReviewAttemptTitle: string = '';
   @State showAgentMemory: boolean = false;
+  @State showAdvancedTools: boolean = false;
+  @State showGoalComposer: boolean = false;
+  @State showGoalOptions: boolean = false;
+  @State showChatDetails: boolean = false;
+  @State showPlanDetails: boolean = false;
   @State lastExecutionReplanKey: string = '';
   @State planSource: string = 'none';
   @State previousPlanSummary: string = '';
@@ -161,6 +166,7 @@ export struct AiPlanner {
       this.successMessage = '约束已预填到“继续调整”，确认内容后点击发送';
     } else {
       this.goal = prompt;
+      this.showGoalComposer = true;
       this.successMessage = '约束已预填到目标输入框，确认内容后点击生成计划';
     }
     this.clearWearableAdjustment();
@@ -174,7 +180,7 @@ export struct AiPlanner {
     await this.refreshAgentAnalysis();
     await this.tryAutoReview();
     this.onWearableAdjustmentChange();
-    this.showServiceSettings = this.apiKey.length === 0;
+    this.showServiceSettings = false;
   }
 
   async onActiveChange(): Promise<void> {
@@ -459,6 +465,8 @@ export struct AiPlanner {
       this.lastExecutionReplanKey = '';
     }
     this.clearPendingPlan();
+    this.showGoalComposer = false;
+    this.showGoalOptions = false;
     this.lastFailedMessage = '';
     this.needsReview = false;
     this.goalDriftInsight = AiAgentP1Helper.emptyDrift();
@@ -569,6 +577,11 @@ export struct AiPlanner {
     this.planSource = 'none';
     this.clearPreviousPlan();
     this.clearPendingPlan();
+    this.showGoalComposer = false;
+    this.showGoalOptions = false;
+    this.showChatDetails = false;
+    this.showPlanDetails = false;
+    this.showAdvancedTools = false;
     this.successMessage = '已开始新对话';
     await this.loadConversationHistory();
   }
@@ -592,6 +605,9 @@ export struct AiPlanner {
     this.errorMessage = '';
     this.lastFailedMessage = '';
     this.successMessage = '已恢复历史对话，可以继续调整计划';
+    this.showGoalComposer = false;
+    this.showGoalOptions = false;
+    this.showChatDetails = false;
     this.closeConversationHistory();
     await this.loadConversationHistory();
   }
@@ -1020,6 +1036,8 @@ export struct AiPlanner {
     this.summary = plan.summary;
     this.planSteps = plan.steps;
     this.planSource = 'local';
+    this.showGoalComposer = false;
+    this.showGoalOptions = false;
     this.appendMessages(requestText, 'AI 服务暂时不可用，已生成明确标注的本地应急计划。' +
       '该计划依据可用时间和番茄参数计算，不包含模型推理结果。');
     this.errorMessage = '';
@@ -1613,24 +1631,24 @@ export struct AiPlanner {
 
   @Builder
   private pageHeader() {
-    Row({ space: 10 }) {
+    Row({ space: 9 }) {
       Column() {
-        Image($r('app.media.ai_plan')).width(24).height(24).fillColor(Color.Black)
+        Image($r('app.media.ai_plan')).width(21).height(21).fillColor(Color.Black)
       }
-      .width(42).height(42)
+      .width(38).height(38)
       .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-      .backgroundColor($r('app.color.primary_green')).borderRadius(14)
+      .backgroundColor($r('app.color.primary_green')).borderRadius(12)
 
-      Column({ space: 3 }) {
-        Text('AI 执行智能体').fontSize($r('app.float.title_font_size'))
+      Column({ space: 2 }) {
+        Text('AI 计划').fontSize($r('app.float.title_font_size'))
           .fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary')).width('100%')
-        Text('结合你的专注历史持续规划、执行与复盘')
+        Text('把目标变成清晰、可执行的下一步')
           .fontSize($r('app.float.caption_font_size'))
           .fontColor($r('app.color.text_tertiary')).width('100%')
       }.layoutWeight(1)
 
       Button('历史')
-        .height(34).fontSize(10).borderRadius(17)
+        .height(32).fontSize(10).borderRadius(16)
         .backgroundColor(this.showConversationHistory ? $r('app.color.primary_green') :
           $r('app.color.ring_track'))
         .fontColor(this.showConversationHistory ? Color.Black : $r('app.color.text_secondary'))
@@ -1638,6 +1656,7 @@ export struct AiPlanner {
           if (this.showConversationHistory) {
             this.closeConversationHistory();
           } else {
+            this.showServiceSettings = false;
             this.showConversationHistory = true;
           }
         })
@@ -1645,37 +1664,36 @@ export struct AiPlanner {
         Image($r('app.media.settings')).width(17).height(17)
           .fillColor($r('app.color.text_secondary'))
       }
-      .width(36).height(36).backgroundColor($r('app.color.ring_track')).borderRadius(18)
-      .onClick(() => this.showServiceSettings = !this.showServiceSettings)
+      .width(34).height(34)
+      .backgroundColor(this.showServiceSettings ? $r('app.color.primary_green') :
+        $r('app.color.ring_track')).borderRadius(17)
+      .onClick(() => {
+        this.showConversationHistory = false;
+        this.showServiceSettings = !this.showServiceSettings;
+      })
     }.width('100%')
   }
 
   @Builder
   private workflowStageBar() {
-    Column({ space: 7 }) {
-      Row() {
+    Column({ space: 5 }) {
+      Row({ space: 5 }) {
         ForEach(['目标', '计划', '执行', '复盘'], (label: string, index: number) => {
-          Column({ space: 4 }) {
-            Text(`${index + 1}`)
-              .width(24).height(24).textAlign(TextAlign.Center).fontSize(10)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(index <= this.getWorkflowStage() ? Color.Black :
-                $r('app.color.text_tertiary'))
-              .backgroundColor(index <= this.getWorkflowStage() ?
-                $r('app.color.primary_green') : $r('app.color.ring_track'))
-              .borderRadius(12)
-            Text(label).fontSize(9)
-              .fontWeight(index === this.getWorkflowStage() ? FontWeight.Bold : FontWeight.Medium)
-              .fontColor(index === this.getWorkflowStage() ? $r('app.color.text_primary') :
-                $r('app.color.text_tertiary'))
-          }.layoutWeight(1).alignItems(HorizontalAlign.Center)
+          Text(label).layoutWeight(1).height(28).textAlign(TextAlign.Center).fontSize(9)
+            .fontWeight(index === this.getWorkflowStage() ? FontWeight.Bold : FontWeight.Medium)
+            .fontColor(index === this.getWorkflowStage() ? Color.Black :
+              (index < this.getWorkflowStage() ? $r('app.color.primary_green') :
+                $r('app.color.text_tertiary')))
+            .backgroundColor(index === this.getWorkflowStage() ?
+              $r('app.color.primary_green') : $r('app.color.ring_track'))
+            .borderRadius(10)
         }, (label: string) => label)
       }.width('100%')
       Text(this.getWorkflowDescription()).fontSize(9)
         .fontColor($r('app.color.text_secondary')).width('100%').textAlign(TextAlign.Center)
     }
-    .width('100%').padding({ left: 10, right: 10, top: 8, bottom: 8 })
-    .backgroundColor($r('app.color.surface')).borderRadius(14)
+    .width('100%').padding({ left: 8, right: 8, top: 7, bottom: 7 })
+    .backgroundColor($r('app.color.surface')).borderRadius(12)
   }
 
   @Builder
@@ -1803,6 +1821,35 @@ export struct AiPlanner {
         }
       }
       .width('100%').height('100%').zIndex(30)
+    }
+  }
+
+  @Builder
+  private serviceSettingsOverlay() {
+    if (this.showServiceSettings) {
+      Stack({ alignContent: Alignment.Top }) {
+        Column()
+          .width('100%').height('100%')
+          .backgroundColor('#88000000')
+          .onClick(() => this.showServiceSettings = false)
+        Scroll() {
+          Column({ space: 10 }) {
+            Row() {
+              Text('AI 服务设置').fontSize(18).fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary'))
+              Blank()
+              Button('关闭').height(30).fontSize(10).borderRadius(15)
+                .backgroundColor($r('app.color.ring_track'))
+                .fontColor($r('app.color.text_secondary'))
+                .onClick(() => this.showServiceSettings = false)
+            }.width('100%').padding({ left: 4, right: 4 })
+            this.serviceCard()
+          }.width('100%')
+        }
+        .width('94%').height('82%').margin({ top: 48 }).padding(14)
+        .scrollBar(BarState.Off).backgroundColor($r('app.color.background')).borderRadius(22)
+      }
+      .width('100%').height('100%').zIndex(32)
     }
   }
 
@@ -2046,24 +2093,24 @@ export struct AiPlanner {
 
   @Builder
   private planInsightCard(insight: AiPlanInsight, quality: AiPlanQualityInsight) {
-    Column({ space: 11 }) {
+    Column({ space: 10 }) {
       Row() {
         Column({ space: 3 }) {
-          Text('本地计划健康度').fontSize(15).fontWeight(FontWeight.Bold)
+          Text('计划概览').fontSize(14).fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary')).width('100%')
-          Text(insight.title).fontSize(11)
+          Text(insight.title).fontSize(10)
             .fontColor(insight.status === 'over_capacity' ?
               $r('app.color.primary_red') : $r('app.color.primary_green')).width('100%')
         }.layoutWeight(1)
-        Text(`${insight.feasibilityPercent}% 可行度`).fontSize(10).fontWeight(FontWeight.Bold)
+        Text(`${insight.feasibilityPercent}% 可行`).fontSize(10).fontWeight(FontWeight.Bold)
           .fontColor(insight.status === 'over_capacity' ?
             $r('app.color.primary_red') : $r('app.color.primary_green'))
-          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+          .padding({ left: 9, right: 9, top: 5, bottom: 5 })
           .backgroundColor($r('app.color.ring_track')).borderRadius(13)
       }.width('100%')
       Row({ space: 8 }) {
         Column({ space: 3 }) {
-          Text('计划进度').fontSize(9).fontColor($r('app.color.text_tertiary'))
+          Text('进度').fontSize(9).fontColor($r('app.color.text_tertiary'))
           Text(`${insight.progressPercent}%`).fontSize(16).fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
@@ -2078,50 +2125,51 @@ export struct AiPlanner {
             .fontColor($r('app.color.text_primary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       }.width('100%')
-      Text(insight.description).fontSize(11).lineHeight(17)
-        .fontColor($r('app.color.text_secondary')).width('100%')
-      Column({ space: 6 }) {
-        Row() {
-          Text('本地计划质检').fontSize(11).fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary')).layoutWeight(1)
-          Text(`${quality.score} 分`).fontSize(10).fontWeight(FontWeight.Bold)
-            .fontColor(quality.status === 'strong' ?
-              $r('app.color.primary_green') : $r('app.color.primary_red'))
-        }.width('100%')
-        Text(quality.description).fontSize(10).lineHeight(16)
-          .fontColor($r('app.color.text_secondary')).width('100%')
-        if (quality.status !== 'strong' && quality.status !== 'empty' && insight.status !== 'completed') {
-          Button(this.serviceMode === 'deepseek' ? '让 AI 按质检结果修正' : '使用质检修正建议')
-            .width('100%').height(34).fontSize(10).enabled(!this.isLoading)
-            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_red'))
-            .borderRadius(17).onClick(() => this.requestPlanQualityImprovement(quality))
-        }
+      if (insight.status === 'over_capacity' || insight.status === 'tight') {
+        Text(insight.description).fontSize(10).lineHeight(15)
+          .fontColor(insight.status === 'over_capacity' ?
+            $r('app.color.primary_red') : $r('app.color.accent_yellow'))
+          .width('100%').padding(9).backgroundColor($r('app.color.ring_track')).borderRadius(9)
       }
-      .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(12)
-      if (insight.status !== 'completed') {
-        Row({ space: 8 }) {
-          Button(!quality.canApply ? '先修正计划' :
-            (this.canApplyStep ? '设为下一任务' : '计时结束后设置'))
-            .layoutWeight(1).height(36).fontSize(11).enabled(this.canApplyStep && quality.canApply)
-            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
-            .borderRadius(18)
-            .onClick(() => this.applyNextStep())
-          Button(this.canApplyStep ? '立即开始专注' : '当前阶段进行中')
-            .layoutWeight(1).height(36).fontSize(11).enabled(this.canApplyStep && quality.canApply)
-            .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(18)
-            .onClick(() => this.startNextStep())
-        }.width('100%')
+      Row({ space: 8 }) {
+        Button(this.showPlanDetails ? '收起详情' : '查看质检详情')
+          .layoutWeight(1).height(32).fontSize(9).borderRadius(16)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+          .onClick(() => this.showPlanDetails = !this.showPlanDetails)
         if (insight.status === 'over_capacity' || insight.status === 'tight') {
-          Button(this.isLoading ? '正在重排…' : 'AI 压缩计划')
-            .width('100%').height(36).fontSize(11).enabled(!this.isLoading)
+          Button(this.isLoading ? '正在重排…' : '压缩计划')
+            .layoutWeight(1).height(32).fontSize(9).enabled(!this.isLoading)
             .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_red'))
-            .borderRadius(18).onClick(() => this.requestPlanCompression())
+            .borderRadius(16).onClick(() => this.requestPlanCompression())
         }
+      }.width('100%')
+      if (this.showPlanDetails) {
+        Column({ space: 6 }) {
+          Text(insight.description).fontSize(10).lineHeight(15)
+            .fontColor($r('app.color.text_secondary')).width('100%')
+          Row() {
+            Text('本地计划质检').fontSize(10).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary')).layoutWeight(1)
+            Text(`${quality.score} 分`).fontSize(10).fontWeight(FontWeight.Bold)
+              .fontColor(quality.status === 'strong' ?
+                $r('app.color.primary_green') : $r('app.color.primary_red'))
+          }.width('100%')
+          Text(quality.description).fontSize(9).lineHeight(14)
+            .fontColor($r('app.color.text_secondary')).width('100%')
+          if (quality.status !== 'strong' && quality.status !== 'empty' &&
+            insight.status !== 'completed') {
+            Button(this.serviceMode === 'deepseek' ? '让 AI 按质检结果修正' : '使用质检修正建议')
+              .width('100%').height(32).fontSize(9).enabled(!this.isLoading)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_red'))
+              .borderRadius(16).onClick(() => this.requestPlanQualityImprovement(quality))
+          }
+        }
+        .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(11)
       }
     }
-    .width('100%').padding(14).backgroundColor($r('app.color.surface'))
+    .width('100%').padding(13).backgroundColor($r('app.color.surface'))
     .border({ width: 1, color: insight.status === 'over_capacity' ?
-      $r('app.color.primary_red') : $r('app.color.card_border') }).borderRadius(16)
+      $r('app.color.primary_red') : $r('app.color.card_border') }).borderRadius(15)
   }
 
   @Builder
@@ -2211,71 +2259,171 @@ export struct AiPlanner {
   }
 
   @Builder
-  private inputCard() {
-    Column({ space: 12 }) {
-      Column({ space: 3 }) {
-        Text(this.planSteps.length > 0 ? '提出新目标或整体重排' : '你想完成什么？')
-          .fontSize(17).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary')).width('100%')
-        Text('智能体会参考你的真实专注历史，而不是只看这一句话')
-          .fontSize(11).fontColor($r('app.color.text_tertiary')).width('100%')
-      }.width('100%')
-      TextArea({ text: this.goal, placeholder: '例如：今晚完成课程报告大纲并找到 3 篇参考资料' })
-        .width('100%').height(92).fontSize(14).fontColor($r('app.color.text_primary'))
-        .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
-        .borderRadius(14).padding(12).onChange((value: string) => this.goal = value)
-      if (this.goal.trim().length > 0) {
-        this.goalReadinessCard(this.getGoalReadiness())
-      }
-      Scroll() {
-        Row({ space: 8 }) {
-          ForEach(this.examples, (example: string) => {
-            Text(example).fontSize(11).fontColor($r('app.color.text_secondary')).maxLines(1)
-              .padding({ left: 11, right: 11, top: 7, bottom: 7 })
-              .backgroundColor($r('app.color.ring_track')).borderRadius(14)
-              .onClick(() => this.goal = example)
-          }, (example: string) => example)
-        }
-      }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
-      Row({ space: 8 }) {
-        Text(`可用 ${this.formatMinutes(this.availableMinutes)}`)
-          .fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1)
-        Button() { Image($r('app.media.minus')).width(13).height(13)
-          .fillColor($r('app.color.text_secondary')) }
-          .width(32).height(32).borderRadius(16).backgroundColor($r('app.color.ring_track'))
-          .onClick(() => this.changeAvailableMinutes(-this.workMinutes))
-        Button() { Image($r('app.media.plus')).width(13).height(13).fillColor(Color.Black) }
-          .width(32).height(32).borderRadius(16).backgroundColor($r('app.color.primary_green'))
-          .onClick(() => this.changeAvailableMinutes(this.workMinutes))
-      }.width('100%')
-      TextInput({ text: this.deadline, placeholder: '截止时间（可选，如：周五 18:00）' })
-        .width('100%').height(40).fontSize(12).fontColor($r('app.color.text_primary'))
-        .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
-        .borderRadius(12).onChange((value: string) => {
-          this.deadline = value;
-          this.errorMessage = '';
-        })
-      Row({ space: 8 }) {
-        Button('今晚 22:00').layoutWeight(1).height(32).fontSize(9).borderRadius(16)
-          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
-          .onClick(() => this.setDeadlineShortcut('今晚 22:00'))
-        Button('明天 18:00').layoutWeight(1).height(32).fontSize(9).borderRadius(16)
-          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
-          .onClick(() => this.setDeadlineShortcut('明天 18:00'))
-        Button('清除截止').layoutWeight(1).height(32).fontSize(9).borderRadius(16)
-          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_tertiary'))
-          .onClick(() => this.setDeadlineShortcut(''))
-      }.width('100%')
-      this.deadlineInsightCard(this.getDeadlineInsight())
-      Button(this.isLoading ? '智能体正在分析…' : '生成或重排计划')
-        .width('100%').height(46).fontSize(14).fontWeight(FontWeight.Bold)
-        .enabled(!this.isLoading && this.pendingPlanSteps.length === 0 && this.getGoalReadiness().ready &&
-          this.getDeadlineInsight().status !== 'unsupported' &&
-          this.getDeadlineInsight().status !== 'expired')
-        .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(23)
-        .onClick(() => this.generatePlan())
+  private serviceStatusRow() {
+    Row({ space: 9 }) {
+      Text('●').fontSize(10)
+        .fontColor(this.isServiceReady() ? $r('app.color.primary_green') :
+          $r('app.color.accent_yellow'))
+      Column({ space: 2 }) {
+        Text(this.isServiceReady() ? 'AI 服务已就绪' : '使用前需要配置 AI 服务')
+          .fontSize(11).fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary')).width('100%')
+        Text(this.serviceMode === 'deepseek' ?
+          (this.isServiceReady() ? `DeepSeek · ${this.deepSeekModel}` : 'DeepSeek · API Key 未填写') :
+          (this.isServiceReady() ? '安全代理 · 已配置' : '安全代理 · 地址未配置'))
+          .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      Button('配置').height(30).fontSize(10).borderRadius(15)
+        .backgroundColor($r('app.color.ring_track'))
+        .fontColor($r('app.color.text_secondary'))
+        .onClick(() => this.showServiceSettings = true)
     }
-    .width('100%').padding(16).backgroundColor($r('app.color.surface'))
-    .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(18)
+    .width('100%').padding(10).backgroundColor($r('app.color.background')).borderRadius(11)
+  }
+
+  @Builder
+  private advancedToolsCard() {
+    Column({ space: 10 }) {
+      Row({ space: 9 }) {
+        Column({ space: 2 }) {
+          Text('上下文与高级信息').fontSize(12).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          Text(`${this.formatSeconds(this.todayWorkSeconds)} 专注 · ${this.consumedTokens} tokens`)
+            .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Button(this.showAdvancedTools ? '收起' : '查看')
+          .height(30).fontSize(10).borderRadius(15)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+          .onClick(() => this.showAdvancedTools = !this.showAdvancedTools)
+      }.width('100%')
+      if (this.showAdvancedTools) {
+        this.contextCard()
+        this.agentMemoryCard()
+        this.tokenBudgetCard(this.getTokenBudgetInsight())
+        this.requestTraceCard()
+      }
+    }
+    .width('100%').padding(12).backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(15)
+  }
+
+  @Builder
+  private inputCard() {
+    if (this.planSteps.length > 0 && !this.showGoalComposer) {
+      Row({ space: 10 }) {
+        Column({ space: 3 }) {
+          Text('当前目标').fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
+          Text(this.primaryGoal.length > 0 ? this.primaryGoal : '继续执行当前计划')
+            .fontSize(13).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Button('新目标 / 重排').height(34).fontSize(10).borderRadius(17)
+          .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
+          .onClick(() => this.showGoalComposer = true)
+      }
+      .width('100%').padding(13).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(15)
+    } else {
+      Column({ space: 11 }) {
+        Row() {
+          Column({ space: 3 }) {
+            Text(this.planSteps.length > 0 ? '调整目标' : '制定一个可执行计划')
+              .fontSize(17).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary')).width('100%')
+            Text('写清要交付的成果，AI 会结合真实专注历史拆解')
+              .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
+          }.layoutWeight(1)
+          if (this.planSteps.length > 0) {
+            Button('收起').height(30).fontSize(10).borderRadius(15)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.showGoalComposer = false)
+          }
+        }.width('100%')
+        TextArea({ text: this.goal, placeholder: '例如：今晚完成课程报告大纲并找到 3 篇参考资料' })
+          .width('100%').height(80).fontSize(13).fontColor($r('app.color.text_primary'))
+          .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
+          .borderRadius(13).padding(11)
+          .onChange((value: string) => this.goal = value.substring(0, 500))
+        if (this.goal.trim().length > 0 && !this.getGoalReadiness().ready) {
+          this.goalReadinessCard(this.getGoalReadiness())
+        } else if (this.goal.trim().length > 0) {
+          Text('✓ 目标描述清晰，可以生成计划').fontSize(10)
+            .fontColor($r('app.color.primary_green')).width('100%')
+        } else {
+          Scroll() {
+            Row({ space: 8 }) {
+              ForEach(this.examples, (example: string) => {
+                Text(example).fontSize(10).fontColor($r('app.color.text_secondary')).maxLines(1)
+                  .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+                  .backgroundColor($r('app.color.ring_track')).borderRadius(14)
+                  .onClick(() => this.goal = example)
+              }, (example: string) => example)
+            }
+          }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
+        }
+
+        Row({ space: 8 }) {
+          Column({ space: 2 }) {
+            Text('时间约束').fontSize(10).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary')).width('100%')
+            Text(`可用 ${this.formatMinutes(this.availableMinutes)} · ${
+              this.deadline.trim().length > 0 ? this.deadline.trim() : '未设截止'}`)
+              .fontSize(9).fontColor($r('app.color.text_tertiary')).maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          Button(this.showGoalOptions ? '收起' : '调整')
+            .height(30).fontSize(10).borderRadius(15)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .onClick(() => this.showGoalOptions = !this.showGoalOptions)
+        }
+        .width('100%').padding(10).backgroundColor($r('app.color.background')).borderRadius(11)
+
+        if (this.showGoalOptions) {
+          Row({ space: 8 }) {
+            Text(`可用 ${this.formatMinutes(this.availableMinutes)}`)
+              .fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+            Button() { Image($r('app.media.minus')).width(13).height(13)
+              .fillColor($r('app.color.text_secondary')) }
+              .width(32).height(32).borderRadius(16).backgroundColor($r('app.color.ring_track'))
+              .onClick(() => this.changeAvailableMinutes(-this.workMinutes))
+            Button() { Image($r('app.media.plus')).width(13).height(13).fillColor(Color.Black) }
+              .width(32).height(32).borderRadius(16).backgroundColor($r('app.color.primary_green'))
+              .onClick(() => this.changeAvailableMinutes(this.workMinutes))
+          }.width('100%')
+          TextInput({ text: this.deadline, placeholder: '截止时间（可选，如：周五 18:00）' })
+            .width('100%').height(40).fontSize(11).fontColor($r('app.color.text_primary'))
+            .placeholderColor($r('app.color.text_tertiary')).backgroundColor($r('app.color.ring_track'))
+            .borderRadius(12).onChange((value: string) => {
+              this.deadline = value.substring(0, 40);
+              this.errorMessage = '';
+            })
+          Row({ space: 7 }) {
+            Button('今晚 22:00').layoutWeight(1).height(30).fontSize(9).borderRadius(15)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.setDeadlineShortcut('今晚 22:00'))
+            Button('明天 18:00').layoutWeight(1).height(30).fontSize(9).borderRadius(15)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.setDeadlineShortcut('明天 18:00'))
+            Button('清除').layoutWeight(1).height(30).fontSize(9).borderRadius(15)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_tertiary'))
+              .onClick(() => this.setDeadlineShortcut(''))
+          }.width('100%')
+          this.deadlineInsightCard(this.getDeadlineInsight())
+        }
+
+        this.serviceStatusRow()
+        Button(this.isLoading ? '正在生成…' :
+          (this.planSteps.length > 0 ? '生成调整提案' : '生成执行计划'))
+          .width('100%').height(44).fontSize(13).fontWeight(FontWeight.Bold)
+          .enabled(!this.isLoading && this.pendingPlanSteps.length === 0 && this.getGoalReadiness().ready &&
+            this.getDeadlineInsight().status !== 'unsupported' &&
+            this.getDeadlineInsight().status !== 'expired')
+          .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(22)
+          .onClick(() => this.generatePlan())
+      }
+      .width('100%').padding(15).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(17)
+    }
   }
 
   @Builder
@@ -2283,27 +2431,35 @@ export struct AiPlanner {
     if (this.chatMessages.length > 0) {
       Column({ space: 8 }) {
         Row() {
-          Text('对话').fontSize(15).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
+          Column({ space: 2 }) {
+            Text('对话记录').fontSize(13).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary')).width('100%')
+            Text(`${this.chatMessages.length} 条消息${this.lastTotalTokens > 0 ?
+              ` · 本次 ${this.lastTotalTokens} tokens` : ''}`)
+              .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           Blank()
-          if (this.lastTotalTokens > 0) {
-            Text(`本次 ${this.lastTotalTokens} tokens`).fontSize(9)
-              .fontColor($r('app.color.text_tertiary'))
-          }
+          Button(this.showChatDetails ? '收起' : '展开')
+            .height(30).fontSize(10).borderRadius(15)
+            .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+            .onClick(() => this.showChatDetails = !this.showChatDetails)
         }.width('100%')
-        ForEach(this.chatMessages, (message: AiChatMessage, index: number) => {
-          Row() {
-            if (message.role === 'user') { Blank().layoutWeight(1) }
-            Text(message.content).fontSize(12).lineHeight(18)
-              .fontColor(message.role === 'user' ? Color.Black : $r('app.color.text_primary'))
-              .padding({ left: 12, right: 12, top: 9, bottom: 9 })
-              .backgroundColor(message.role === 'user' ?
-                $r('app.color.primary_green') : $r('app.color.ring_track'))
-              .borderRadius(14).constraintSize({ maxWidth: '86%' })
-            if (message.role !== 'user') { Blank().layoutWeight(1) }
-          }.width('100%')
-        }, (message: AiChatMessage, index: number) => `${message.createdAt}-${index}`)
+        if (this.showChatDetails) {
+          ForEach(this.chatMessages, (message: AiChatMessage, index: number) => {
+            Row() {
+              if (message.role === 'user') { Blank().layoutWeight(1) }
+              Text(message.content).fontSize(11).lineHeight(17)
+                .fontColor(message.role === 'user' ? Color.Black : $r('app.color.text_primary'))
+                .padding({ left: 11, right: 11, top: 8, bottom: 8 })
+                .backgroundColor(message.role === 'user' ?
+                  $r('app.color.primary_green') : $r('app.color.ring_track'))
+                .borderRadius(13).constraintSize({ maxWidth: '88%' })
+              if (message.role !== 'user') { Blank().layoutWeight(1) }
+            }.width('100%')
+          }, (message: AiChatMessage, index: number) => `${message.createdAt}-${index}`)
+        }
       }
-      .width('100%').padding(14).backgroundColor($r('app.color.surface')).borderRadius(16)
+      .width('100%').padding(12).backgroundColor($r('app.color.surface')).borderRadius(15)
     }
   }
 
@@ -2471,11 +2627,16 @@ export struct AiPlanner {
           Text(this.formatStepProgress(step))
             .fontSize(10).fontColor($r('app.color.primary_green')).width('100%')
         }.layoutWeight(1)
+        Text(step.completed ? '已完成' :
+          (index === this.getPlanInsight().nextStepIndex ? '下一步' : '待执行'))
+          .fontSize(9).fontWeight(FontWeight.Bold)
+          .fontColor(step.completed || index === this.getPlanInsight().nextStepIndex ?
+            $r('app.color.primary_green') : $r('app.color.text_tertiary'))
       }.width('100%')
       if (step.note.length > 0) {
         Text(step.note).fontSize(12).lineHeight(18).fontColor($r('app.color.text_secondary')).width('100%')
       }
-      if (!step.completed) {
+      if (!step.completed && index === this.getPlanInsight().nextStepIndex) {
         Row({ space: 8 }) {
           Button(!this.getPlanQuality(this.getPlanInsight()).canApply ? '先修正计划' : '设为任务')
             .layoutWeight(1).height(36).fontSize(10)
@@ -2490,19 +2651,15 @@ export struct AiPlanner {
         }.width('100%')
       }
     }
-    .width('100%').padding(14).backgroundColor($r('app.color.surface'))
-    .border({ width: 1, color: step.completed ? $r('app.color.primary_green') : $r('app.color.card_border') })
-    .borderRadius(16)
+    .width('100%').padding(13).backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: step.completed || index === this.getPlanInsight().nextStepIndex ?
+      $r('app.color.primary_green') : $r('app.color.card_border') })
+    .borderRadius(15)
   }
 
   @Builder
   private plannerControlPane() {
     Column({ space: 12 }) {
-      this.serviceCard()
-      this.tokenBudgetCard(this.getTokenBudgetInsight())
-      this.requestTraceCard()
-      this.contextCard()
-      this.agentMemoryCard()
       if (this.needsReview && this.lastCompletedStepTitle.length > 0) {
         this.executionCheckInCard()
       }
@@ -2512,6 +2669,7 @@ export struct AiPlanner {
       }
       this.wearableAdjustmentCard()
       this.inputCard()
+      this.advancedToolsCard()
     }.width('100%')
   }
 
@@ -2526,7 +2684,6 @@ export struct AiPlanner {
         Text(this.successMessage).width('100%').fontSize(12).fontColor($r('app.color.primary_green'))
           .padding(12).backgroundColor('#2065FE08').borderRadius(12)
       }
-      this.conversationCard()
       this.planProposalCard(this.getPendingPlanStats())
       if (this.planSteps.length > 0) {
         Row() {
@@ -2546,9 +2703,9 @@ export struct AiPlanner {
             .fontSize(12).fontColor($r('app.color.primary_green'))
         }.width('100%').padding({ left: 4, right: 4 })
         if (this.summary.length > 0) {
-          Text(this.summary).width('100%').fontSize(12).lineHeight(19)
-            .fontColor($r('app.color.text_secondary')).padding(14)
-            .backgroundColor($r('app.color.surface')).borderRadius(16)
+          Text(this.summary).width('100%').fontSize(11).lineHeight(17).maxLines(3)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .fontColor($r('app.color.text_secondary')).padding({ left: 4, right: 4 })
         }
         this.planVersionCard()
         this.planInsightCard(this.getPlanInsight(), this.getPlanQuality(this.getPlanInsight()))
@@ -2557,18 +2714,19 @@ export struct AiPlanner {
         }, (step: AiPlanStep, index: number) => `${index}-${step.title}`)
       }
       this.followUpCard()
+      this.conversationCard()
     }.width('100%')
   }
 
   build() {
     Stack({ alignContent: Alignment.Top }) {
-      Column({ space: 12 }) {
+      Column({ space: 9 }) {
         this.pageHeader()
         this.workflowStageBar()
         Scroll() {
           GridRow({
             columns: { xs: 4, sm: 12 },
-            gutter: { x: 12, y: 12 },
+            gutter: { x: 10, y: 10 },
             breakpoints: { value: ['720vp'], reference: BreakpointsReference.WindowSize }
           }) {
             GridCol({ span: { xs: 4, sm: 5 } }) {
@@ -2580,9 +2738,10 @@ export struct AiPlanner {
           }.width('100%').padding({ bottom: 20 })
         }.scrollBar(BarState.Off).layoutWeight(1).width('100%')
       }
-      .width('100%').height('100%').padding({ left: 12, right: 12, top: 10 })
+      .width('100%').height('100%').padding({ left: 12, right: 12, top: 8 })
 
       this.conversationListOverlay()
+      this.serviceSettingsOverlay()
     }
     .width('100%').height('100%')
     .backgroundColor($r('app.color.background'))
