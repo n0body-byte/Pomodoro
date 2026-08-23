@@ -1469,6 +1469,14 @@ export struct AiPlanner {
     return '先写清目标、截止时间与可用时长';
   }
 
+  private getWorkflowStageLabel(): string {
+    const stage = this.getWorkflowStage();
+    if (stage === 1) return '计划';
+    if (stage === 2) return '执行';
+    if (stage === 3) return '复盘';
+    return '目标';
+  }
+
   private hasCurrentConversation(): boolean {
     return this.chatMessages.length > 0 || this.planSteps.length > 0 || this.requestTraces.length > 0;
   }
@@ -1676,24 +1684,78 @@ export struct AiPlanner {
 
   @Builder
   private workflowStageBar() {
-    Column({ space: 5 }) {
-      Row({ space: 5 }) {
+    Column({ space: 8 }) {
+      Row() {
         ForEach(['目标', '计划', '执行', '复盘'], (label: string, index: number) => {
-          Text(label).layoutWeight(1).height(28).textAlign(TextAlign.Center).fontSize(9)
-            .fontWeight(index === this.getWorkflowStage() ? FontWeight.Bold : FontWeight.Medium)
-            .fontColor(index === this.getWorkflowStage() ? Color.Black :
-              (index < this.getWorkflowStage() ? $r('app.color.primary_green') :
-                $r('app.color.text_tertiary')))
+          Row() {
+            if (index === 0) {
+              Blank().layoutWeight(1)
+            } else {
+              Divider().layoutWeight(1).height(2)
+                .color(index <= this.getWorkflowStage() ?
+                  $r('app.color.primary_green') : $r('app.color.divider'))
+            }
+            Column() {
+              Text(index < this.getWorkflowStage() ? '✓' : `${index + 1}`)
+                .fontSize(index < this.getWorkflowStage() ? 11 : 10)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(index === this.getWorkflowStage() ? Color.Black :
+                  (index < this.getWorkflowStage() ? $r('app.color.primary_green') :
+                    $r('app.color.text_tertiary')))
+            }
+            .width(24).height(24)
+            .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
             .backgroundColor(index === this.getWorkflowStage() ?
               $r('app.color.primary_green') : $r('app.color.ring_track'))
-            .borderRadius(10)
+            .border({
+              width: index === this.getWorkflowStage() ? 2 : 1,
+              color: index <= this.getWorkflowStage() ?
+                $r('app.color.primary_green') : $r('app.color.divider')
+            })
+            .borderRadius(12)
+            if (index === 3) {
+              Blank().layoutWeight(1)
+            } else {
+              Divider().layoutWeight(1).height(2)
+                .color(index < this.getWorkflowStage() ?
+                  $r('app.color.primary_green') : $r('app.color.divider'))
+            }
+          }.layoutWeight(1).height(28)
         }, (label: string) => label)
       }.width('100%')
-      Text(this.getWorkflowDescription()).fontSize(9)
-        .fontColor($r('app.color.text_secondary')).width('100%').textAlign(TextAlign.Center)
+
+      Row() {
+        ForEach(['目标', '计划', '执行', '复盘'], (label: string, index: number) => {
+          Column({ space: 2 }) {
+            Text(label).fontSize(10)
+              .fontWeight(index === this.getWorkflowStage() ? FontWeight.Bold : FontWeight.Medium)
+              .fontColor(index === this.getWorkflowStage() ? $r('app.color.text_primary') :
+                (index < this.getWorkflowStage() ? $r('app.color.primary_green') :
+                  $r('app.color.text_tertiary')))
+            Text(index === this.getWorkflowStage() ? '当前阶段' :
+              (index < this.getWorkflowStage() ? '已完成' : '待进行'))
+              .fontSize(8).fontWeight(index === this.getWorkflowStage() ?
+                FontWeight.Bold : FontWeight.Regular)
+              .fontColor(index <= this.getWorkflowStage() ?
+                $r('app.color.primary_green') : $r('app.color.text_tertiary'))
+          }.layoutWeight(1).alignItems(HorizontalAlign.Center)
+        }, (label: string) => label)
+      }.width('100%')
+
+      Row({ space: 8 }) {
+        Text('当前阶段').fontSize(9).fontWeight(FontWeight.Bold).fontColor(Color.Black)
+          .padding({ left: 8, right: 8, top: 5, bottom: 5 })
+          .backgroundColor($r('app.color.primary_green')).borderRadius(10)
+        Text(`${this.getWorkflowStageLabel()} · ${this.getWorkflowDescription()}`)
+          .fontSize(10).fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_secondary')).layoutWeight(1)
+      }
+      .width('100%').padding({ left: 9, right: 9, top: 8, bottom: 8 })
+      .backgroundColor($r('app.color.background')).borderRadius(10)
     }
-    .width('100%').padding({ left: 8, right: 8, top: 7, bottom: 7 })
-    .backgroundColor($r('app.color.surface')).borderRadius(12)
+    .width('100%').padding({ left: 10, right: 10, top: 10, bottom: 10 })
+    .backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(14)
   }
 
   @Builder
