@@ -4,6 +4,7 @@ import {
   FocusInsightHelper,
   FocusInsightRecord
 } from '../utils/FocusInsightHelper';
+import { FocusHabitHelper, ProjectProgressItem } from '../utils/FocusHabitHelper';
 
 @Component
 export struct Statistics {
@@ -17,7 +18,9 @@ export struct Statistics {
   @State maxSeconds: number = 0;
   @State sessionCount: number = 0;
   @State focusInsight: FocusActionInsight = FocusInsightHelper.empty();
+  @State projectProgress: ProjectProgressItem[] = [];
   onGoTimer?: () => void;
+  onApplyWorkMinutes?: (minutes: number) => void;
   private hostCtx: Context | null = null;
 
   async aboutToAppear(): Promise<void> {
@@ -58,6 +61,7 @@ export struct Statistics {
         insightRecords.push(this.toInsightRecord(record));
       }
       this.focusInsight = FocusInsightHelper.analyze(insightRecords);
+      this.projectProgress = FocusHabitHelper.buildProjectProgress(history, 4);
 
       const active = this.getActiveData();
       let total = 0;
@@ -303,12 +307,55 @@ export struct Statistics {
                       this.onGoTimer();
                     }
                   })
+              } else if (this.focusInsight.actionKind === 'shorten' &&
+                this.focusInsight.suggestedWorkMinutes > 0) {
+                Button(`应用 ${this.focusInsight.suggestedWorkMinutes} 分钟专注`)
+                  .height(32).fontSize(11).fontWeight(FontWeight.Bold).borderRadius(16)
+                  .margin({ top: 4 })
+                  .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+                  .onClick(() => {
+                    if (this.onApplyWorkMinutes !== undefined) {
+                      this.onApplyWorkMinutes(this.focusInsight.suggestedWorkMinutes);
+                    }
+                  })
+              } else {
+                Button('去计时页执行建议')
+                  .height(32).fontSize(11).borderRadius(16)
+                  .margin({ top: 4 })
+                  .backgroundColor($r('app.color.ring_track'))
+                  .fontColor($r('app.color.text_secondary'))
+                  .onClick(() => {
+                    if (this.onGoTimer !== undefined) {
+                      this.onGoTimer();
+                    }
+                  })
               }
             }
             .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(10)
           }
           .width('100%').padding(14).backgroundColor($r('app.color.surface')).borderRadius(14)
           .border({ width: 1, color: $r('app.color.primary_green') })
+
+          if (this.projectProgress.length > 0) {
+            Column({ space: 8 }) {
+              Text('近 7 天项目投入').fontSize(15).fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary')).width('100%')
+              ForEach(this.projectProgress, (item: ProjectProgressItem) => {
+                Row() {
+                  Column({ space: 2 }) {
+                    Text(item.project).fontSize(12).fontWeight(FontWeight.Medium)
+                      .fontColor($r('app.color.text_primary'))
+                    Text(`${item.sessions} 次专注`).fontSize(10)
+                      .fontColor($r('app.color.text_tertiary'))
+                  }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+                  Text(this.getTotalLabel(item.workSeconds)).fontSize(12).fontWeight(FontWeight.Bold)
+                    .fontColor($r('app.color.primary_red'))
+                }.width('100%')
+              }, (item: ProjectProgressItem) => item.project)
+            }
+            .width('100%').padding(14).backgroundColor($r('app.color.surface')).borderRadius(14)
+            .border({ width: 1, color: $r('app.color.card_border') })
+          }
 
           Column() {
             if (this.sessionCount === 0) {

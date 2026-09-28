@@ -1,10 +1,15 @@
 import { PreferencesHelper, SessionRecord } from '../utils/PreferencesHelper';
+import { FocusHabitHelper } from '../utils/FocusHabitHelper';
+import { pasteboard } from '@kit.BasicServicesKit';
 
 @Component
 export struct History {
   @Prop @Watch('onActiveChange') active: boolean = false;
   @State records: SessionRecord[] = [];
   @State showEditor: boolean = false;
+  @State showExport: boolean = false;
+  @State exportText: string = '';
+  @State exportMessage: string = '';
   @State editTask: string = '';
   @State editProject: string = '';
   @State editTag: string = '';
@@ -27,6 +32,29 @@ export struct History {
   onRepeatTask?: (record: SessionRecord) => void;
   onGoTimer?: () => void;
   private editOriginal: SessionRecord | null = null;
+
+  private async exportRecords(format: string): Promise<void> {
+    if (this.records.length === 0) {
+      this.exportMessage = '暂无记录可导出';
+      this.showExport = true;
+      this.exportText = '';
+      return;
+    }
+    this.exportText = format === 'csv' ?
+      FocusHabitHelper.exportToCsv(this.records) :
+      FocusHabitHelper.exportToJson(this.records);
+    this.exportMessage = '';
+    try {
+      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.exportText);
+      await pasteboard.getSystemPasteboard().setData(data);
+      this.exportMessage = format === 'csv' ?
+        'CSV 已复制到剪贴板，也可在下方长按再次复制。' :
+        'JSON 已复制到剪贴板，也可在下方长按再次复制。';
+    } catch {
+      this.exportMessage = '已生成导出内容，请长按文本手动复制。';
+    }
+    this.showExport = true;
+  }
   private filterKeys: string[] = ['all', 'work', 'break', 'completed', 'partial', 'reviewed'];
   private filterLabels: string[] = ['全部', '专注', '休息', '已完成', '部分', '已复盘'];
   private ratingValues: number[] = [1, 2, 3, 4, 5];
@@ -232,12 +260,18 @@ export struct History {
 
   build() {
     Column() {
-      Row() {
+      Row({ space: 8 }) {
         Text('历史记录')
           .fontSize($r('app.float.title_font_size'))
           .fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary'))
-        Blank()
+          .layoutWeight(1)
+        Button('导出')
+          .height(34).fontSize(11)
+          .fontColor($r('app.color.text_secondary'))
+          .backgroundColor($r('app.color.ring_track'))
+          .borderRadius(17)
+          .onClick(() => this.exportRecords('csv'))
         Button('+ 补记')
           .height(34).fontSize(12)
           .fontColor(Color.White)
@@ -247,6 +281,34 @@ export struct History {
       }
       .width('100%')
       .padding({ left: 12, right: 12, top: 8, bottom: 12 })
+
+      if (this.showExport) {
+        Column({ space: 10 }) {
+          Text('导出专注记录').fontSize(16).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          if (this.exportMessage.length > 0) {
+            Text(this.exportMessage).fontSize(11).fontColor($r('app.color.text_secondary')).width('100%')
+          }
+          Row({ space: 8 }) {
+            Button('复制 CSV').layoutWeight(1).height(34).fontSize(11).borderRadius(17)
+              .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+              .onClick(() => this.exportRecords('csv'))
+            Button('复制 JSON').layoutWeight(1).height(34).fontSize(11).borderRadius(17)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.exportRecords('json'))
+            Button('关闭').width(72).height(34).fontSize(11).borderRadius(17)
+              .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.showExport = false)
+          }.width('100%')
+          TextArea({ text: this.exportText })
+            .width('100%').height(180).fontSize(10)
+            .fontColor($r('app.color.text_primary'))
+            .backgroundColor($r('app.color.ring_track')).borderRadius(12).padding(10)
+        }
+        .width('100%').padding(12).margin({ left: 10, right: 10, bottom: 8 })
+        .backgroundColor($r('app.color.surface')).borderRadius(16)
+        .border({ width: 1, color: $r('app.color.card_border') })
+      }
 
       if (!this.showEditor) {
         Column({ space: 8 }) {

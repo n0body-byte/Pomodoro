@@ -19,6 +19,7 @@ import { AiDeadlineHelper } from '../main/ets/utils/AiDeadlineHelper';
 import { AiTokenBudgetHelper } from '../main/ets/utils/AiTokenBudgetHelper';
 import { FocusInsightHelper, FocusInsightRecord } from '../main/ets/utils/FocusInsightHelper';
 import { ProductGuideHelper } from '../main/ets/utils/ProductGuideHelper';
+import { FocusHabitHelper } from '../main/ets/utils/FocusHabitHelper';
 import {
   HeartRateSample,
   MockHeartRateProvider,
@@ -996,6 +997,69 @@ export default function localUnitTest() {
       expect(ProductGuideHelper.shouldShowStartPath(true, true)).assertFalse();
       expect(ProductGuideHelper.clampGuideIndex(5, 3)).assertEqual(2);
       expect(ProductGuideHelper.clampGuideIndex(-1, 3)).assertEqual(0);
+    });
+
+    it('focusHabitBuildsRecentTasksAndStreak', 0, () => {
+      const now = new Date(2026, 8, 28, 12, 0).getTime();
+      const history: SessionRecord[] = [
+        { date: '2026-09-28', workSeconds: 900, completedAt: now, type: 'work',
+          status: 'completed', task: '写答辩稿', project: '复赛' },
+        { date: '2026-09-27', workSeconds: 1200, completedAt: now - 86400000, type: 'work',
+          status: 'completed', task: '写答辩稿', project: '复赛' },
+        { date: '2026-09-27', workSeconds: 600, completedAt: now - 86400000 + 1000, type: 'work',
+          status: 'completed', task: '修导出', project: '复赛' },
+        { date: '2026-09-26', workSeconds: 300, completedAt: now - 2 * 86400000, type: 'break',
+          status: 'completed', task: '休息' }
+      ];
+      const recent = FocusHabitHelper.buildRecentTasks(history, 3);
+      expect(recent.length).assertEqual(2);
+      expect(recent[0].task).assertEqual('写答辩稿');
+      expect(FocusHabitHelper.computeCurrentStreak(history, now)).assertEqual(2);
+      expect(FocusHabitHelper.remainingToTarget(1, 8)).assertEqual(7);
+    });
+
+    it('focusHabitExportsCsvAndProjectProgress', 0, () => {
+      const now = new Date(2026, 8, 28, 12, 0).getTime();
+      const history: SessionRecord[] = [
+        { id: 'a', date: '2026-09-28', workSeconds: 1500, completedAt: now, type: 'work',
+          status: 'completed', task: '计划', project: 'A', note: 'ok,done' },
+        { id: 'b', date: '2026-09-28', workSeconds: 600, completedAt: now - 1000, type: 'work',
+          status: 'completed', task: '联调', project: 'B' }
+      ];
+      const csv = FocusHabitHelper.exportToCsv(history);
+      expect(csv.indexOf('workSeconds') >= 0).assertTrue();
+      expect(csv.indexOf('ok,done') >= 0).assertTrue();
+      const projects = FocusHabitHelper.buildProjectProgress(history, 4, now);
+      expect(projects.length).assertEqual(2);
+      expect(projects[0].project).assertEqual('A');
+    });
+
+    it('focusInsightShortenActionCarriesSuggestedMinutes', 0, () => {
+      const records: FocusInsightRecord[] = [
+        { workSeconds: 600, plannedSeconds: 1500,
+          completedAt: new Date(2026, 7, 22, 14, 30).getTime(), type: 'work',
+          focusRating: 2, energyRating: 2, interruptionReason: '任务卡住' }
+      ];
+      const insight = FocusInsightHelper.analyze(records);
+      expect(insight.actionKind).assertEqual('shorten');
+      expect(insight.suggestedWorkMinutes).assertEqual(15);
+    });
+
+    it('aiPlanProposalDetectsMinorAdjustments', 0, () => {
+      const current: AiPlanStep[] = [
+        { title: '写摘要', project: '复赛', tag: '文档', note: '初稿',
+          estimatedPomodoros: 2, reason: '先完成骨架', completed: false }
+      ];
+      const minor: AiPlanStep[] = [
+        { title: '写摘要', project: '复赛', tag: '文档', note: '初稿+例子',
+          estimatedPomodoros: 2, reason: '补充例子', completed: false }
+      ];
+      const major: AiPlanStep[] = [
+        { title: '重写大纲', project: '复赛', tag: '文档', note: '新结构',
+          estimatedPomodoros: 4, reason: '推翻重来', completed: false }
+      ];
+      expect(AiPlanProposalHelper.isMinorProposal(current, minor)).assertTrue();
+      expect(AiPlanProposalHelper.isMinorProposal(current, major)).assertFalse();
     });
   });
 }

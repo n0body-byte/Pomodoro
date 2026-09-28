@@ -11,6 +11,7 @@ export struct Insights {
   onHistoryChanged?: () => void;
   onRepeatTask?: (record: SessionRecord) => void;
   onGoTimer?: () => void;
+  onApplyWorkMinutes?: (minutes: number) => void;
 
   @Builder
   sectionButton(label: string, index: number) {
@@ -48,6 +49,11 @@ export struct Insights {
             onGoTimer: () => {
               if (this.onGoTimer !== undefined) {
                 this.onGoTimer();
+              }
+            },
+            onApplyWorkMinutes: (minutes: number) => {
+              if (this.onApplyWorkMinutes !== undefined) {
+                this.onApplyWorkMinutes(minutes);
               }
             }
           })

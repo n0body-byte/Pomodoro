@@ -20,6 +20,7 @@ import {
   WearableRecoveryResolution
 } from '../utils/WearableHealthHelper';
 import { ProductGuideHelper, ProductGuideStep } from '../utils/ProductGuideHelper';
+import { FocusHabitHelper, RecentTaskItem } from '../utils/FocusHabitHelper';
 import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
@@ -89,6 +90,9 @@ struct Index {
   @State feedbackWasCompleted: boolean = true;
   @State showProductGuide: boolean = false;
   @State productGuideIndex: number = 0;
+  @State recentTasks: RecentTaskItem[] = [];
+  @State streakDays: number = 0;
+  @State restTip: string = FocusHabitHelper.restTip(0);
   private productGuideSteps: ProductGuideStep[] = ProductGuideHelper.guideSteps();
 
   private timerId: number | null = null;
@@ -577,6 +581,7 @@ struct Index {
   }
 
   async loadTodayStats(): Promise<void> {
+    await this.refreshHabitSummary();
     try {
       this.todayCount = await PreferencesHelper.getTodaySessions(this.getContext());
       this.todayWorkSeconds = await PreferencesHelper.getTodayWorkSeconds(this.getContext());
@@ -773,6 +778,11 @@ struct Index {
     this.feedbackInterruptionReason = '无';
     this.feedbackOutcomeDraft = '';
     this.showSessionFeedback = true;
+    PreferencesHelper.loadLastFeedbackLite(this.getContext()).then((last) => {
+      this.feedbackFocusRating = last.focusRating;
+      this.feedbackEnergyRating = last.energyRating;
+      this.feedbackInterruptionReason = last.interruptionReason;
+    });
   }
 
   private continueAfterSessionFeedback(): void {
@@ -798,8 +808,61 @@ struct Index {
     try {
       await PreferencesHelper.saveSessionFeedback(
         this.getContext(), this.feedbackRecordCompletedAt, feedback);
+      await PreferencesHelper.saveLastFeedbackLite(this.getContext(), feedback.focusRating,
+        feedback.energyRating, feedback.interruptionReason);
     } finally {
       this.continueAfterSessionFeedback();
+    }
+  }
+
+  private async reuseLastFeedbackQuickSave(): Promise<void> {
+    const last = await PreferencesHelper.loadLastFeedbackLite(this.getContext());
+    this.feedbackFocusRating = last.focusRating;
+    this.feedbackEnergyRating = last.energyRating;
+    this.feedbackInterruptionReason = last.interruptionReason;
+    await this.submitSessionFeedback();
+  }
+
+  private applyRecentTask(item: RecentTaskItem): void {
+    if (!TimerPlanHelper.canHandoffAiStep(this.isRunning, this.remainingSeconds, this.totalSeconds)) {
+      return;
+    }
+    this.currentTask = item.task;
+    this.currentProject = item.project;
+    this.currentTag = item.tag;
+    this.currentNote = item.note;
+    this.estimatedPomodoros = Math.max(1, item.estimatedPomodoros);
+    this.currentTaskCompleted = 0;
+    this.currentTaskSource = 'manual';
+    this.currentTaskConversationId = '';
+    this.taskTrackingStartedAt = Date.now();
+    this.saveTaskContext();
+  }
+
+  private async applySuggestedWorkMinutes(minutes: number): Promise<void> {
+    const normalized = Math.max(1, Math.min(60, Math.round(minutes)));
+    if (!TimerPlanHelper.canHandoffAiStep(this.isRunning, this.remainingSeconds, this.totalSeconds)) {
+      this.openTimerTab();
+      return;
+    }
+    await PreferencesHelper.saveWorkDuration(this.getContext(), normalized * 60);
+    await PreferencesHelper.saveTimerPreset(this.getContext(), 'custom');
+    await this.loadSettings();
+    this.totalSeconds = this.workDuration;
+    this.remainingSeconds = this.workDuration;
+    this.updateProgress();
+    this.openTimerTab();
+  }
+
+  private async refreshHabitSummary(): Promise<void> {
+    try {
+      const history = await PreferencesHelper.loadSessionHistory(this.getContext());
+      this.recentTasks = FocusHabitHelper.buildRecentTasks(history, 3);
+      this.streakDays = FocusHabitHelper.computeCurrentStreak(history);
+      this.restTip = FocusHabitHelper.restTip(this.completedSessions);
+    } catch {
+      this.recentTasks = [];
+      this.streakDays = 0;
     }
   }
 
@@ -1331,7 +1394,12 @@ struct Index {
                 .borderRadius(20).backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
                 .onClick(() => this.submitSessionFeedback())
             }.width('100%')
-            Text('反馈会写入本轮记录，帮助后续计划与行动洞察根据真实状态调整。')
+            Button('沿用上次评分并保存')
+              .width('100%').height(36).fontSize(11).borderRadius(18)
+              .backgroundColor($r('app.color.ring_track'))
+              .fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.reuseLastFeedbackQuickSave())
+            Text('反馈会写入本轮记录；连续多轮时可一键沿用上次评分，减少打断。')
               .fontSize(9).lineHeight(14).fontColor($r('app.color.text_tertiary')).width('100%')
           }
           .width('100%').padding(18).backgroundColor($r('app.color.surface')).borderRadius(22)
@@ -1447,6 +1515,13 @@ struct Index {
         }
         .width('100%')
         .justifyContent(FlexAlign.SpaceBetween)
+
+        Text(this.streakDays > 0 ?
+          `连续 ${this.streakDays} 天 · 今日还差 ${FocusHabitHelper.remainingToTarget(this.todayCount, this.dailyTarget)} 个` :
+          `今日还差 ${FocusHabitHelper.remainingToTarget(this.todayCount, this.dailyTarget)} 个番茄达成目标`)
+          .fontSize(10)
+          .fontColor($r('app.color.text_tertiary'))
+          .width('100%')
       }
       .width('100%')
       .padding({ left: 18, right: 18, top: 14, bottom: 14 })
@@ -1504,6 +1579,22 @@ struct Index {
               .fontColor($r('app.color.text_secondary'))
               .onClick(() => this.openTaskEditor())
           }.width('100%')
+          if (this.recentTasks.length > 0) {
+            Text('最近任务，点按续摊')
+              .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
+            Scroll() {
+              Row({ space: 8 }) {
+                ForEach(this.recentTasks, (item: RecentTaskItem) => {
+                  Button(item.task)
+                    .height(30).fontSize(10).borderRadius(15)
+                    .constraintSize({ maxWidth: 160 })
+                    .backgroundColor($r('app.color.ring_track'))
+                    .fontColor($r('app.color.text_secondary'))
+                    .onClick(() => this.applyRecentTask(item))
+                }, (item: RecentTaskItem) => `${item.task}-${item.project}`)
+              }
+            }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
+          }
         }
         .width('100%')
         .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -1511,6 +1602,23 @@ struct Index {
         .backgroundColor($r('app.color.surface'))
         .borderRadius(14)
         .border({ width: 1, color: $r('app.color.primary_green') })
+      } else if (this.currentTask.length === 0 && this.recentTasks.length > 0 &&
+        !this.showAiStepHandoff) {
+        Scroll() {
+          Row({ space: 8 }) {
+            Text('续摊').fontSize(10).fontColor($r('app.color.text_tertiary'))
+            ForEach(this.recentTasks, (item: RecentTaskItem) => {
+              Button(item.task)
+                .height(28).fontSize(10).borderRadius(14)
+                .constraintSize({ maxWidth: 140 })
+                .backgroundColor($r('app.color.ring_track'))
+                .fontColor($r('app.color.text_secondary'))
+                .onClick(() => this.applyRecentTask(item))
+            }, (item: RecentTaskItem) => `recent-${item.task}-${item.project}`)
+          }
+        }
+        .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+        .width('100%').margin({ top: 8 })
       }
 
       if (this.showAiStepHandoff) {
@@ -1569,6 +1677,15 @@ struct Index {
           onSkip: () => this.onSkipPhase()
         })
           .margin({ top: 28 })
+
+        if (!this.isWorkMode) {
+          Text(this.restTip)
+            .fontSize(11).lineHeight(16)
+            .fontColor($r('app.color.text_secondary'))
+            .textAlign(TextAlign.Center)
+            .margin({ top: 14 })
+            .padding({ left: 12, right: 12 })
+        }
       }
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
@@ -1737,7 +1854,8 @@ struct Index {
             this.isRunning, this.remainingSeconds, this.totalSeconds),
           onHistoryChanged: () => this.loadTodayStats(),
           onRepeatTask: (record: SessionRecord) => this.repeatHistoryTask(record),
-          onGoTimer: () => this.openTimerTab()
+          onGoTimer: () => this.openTimerTab(),
+          onApplyWorkMinutes: (minutes: number) => this.applySuggestedWorkMinutes(minutes)
         })
       }
       .tabBar(this.tabBarInsights)

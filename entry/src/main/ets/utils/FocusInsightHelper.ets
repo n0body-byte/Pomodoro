@@ -25,6 +25,8 @@ export interface FocusActionInsight {
   topInterruption: string;
   actionTitle: string;
   actionDescription: string;
+  actionKind: string;
+  suggestedWorkMinutes: number;
 }
 
 interface InterruptionCount {
@@ -35,6 +37,8 @@ interface InterruptionCount {
 interface FocusAction {
   title: string;
   description: string;
+  kind: string;
+  suggestedWorkMinutes: number;
 }
 
 interface FocusTrend {
@@ -60,7 +64,9 @@ export class FocusInsightHelper {
       trendPercent: 0,
       topInterruption: '暂无',
       actionTitle: '完成第一轮专注',
-      actionDescription: '完成计时并填写轻量复盘后，这里会给出基于真实记录的行动建议。'
+      actionDescription: '完成计时并填写轻量复盘后，这里会给出基于真实记录的行动建议。',
+      actionKind: 'start',
+      suggestedWorkMinutes: 0
     };
   }
 
@@ -141,7 +147,9 @@ export class FocusInsightHelper {
       trendPercent: trend.percent,
       topInterruption: topInterruption,
       actionTitle: action.title,
-      actionDescription: action.description
+      actionDescription: action.description,
+      actionKind: action.kind,
+      suggestedWorkMinutes: action.suggestedWorkMinutes
     };
   }
 
@@ -201,36 +209,48 @@ export class FocusInsightHelper {
     if (reflectedSessions === 0) {
       return {
         title: '补充一次轻量复盘',
-        description: '下一轮结束后记录专注度、精力和打断原因，建议才会更贴合你的状态。'
+        description: '下一轮结束后记录专注度、精力和打断原因，建议才会更贴合你的状态。',
+        kind: 'reflect',
+        suggestedWorkMinutes: 0
       };
     }
     if (averageFocus <= 2.5) {
       return {
         title: '缩短下一轮并明确交付',
-        description: '先安排 1 个番茄钟，只保留一个可核验产出，完成后再决定是否继续。'
+        description: '先安排 15 分钟专注，只保留一个可核验产出，完成后再决定是否继续。',
+        kind: 'shorten',
+        suggestedWorkMinutes: 15
       };
     }
     if (estimatedSessions >= 2 && accuracy < 70) {
       return {
         title: '重新校准任务估时',
-        description: '最近计划时长与实际偏差较大，把任务拆小并参考相似历史记录重新估算。'
+        description: '最近计划时长与实际偏差较大，把任务拆小并参考相似历史记录重新估算。',
+        kind: 'reestimate',
+        suggestedWorkMinutes: 0
       };
     }
     if (workSessions >= 3 && reflectionCoverage < 50) {
       return {
         title: '连续完成 3 次轻量复盘',
-        description: '当前反馈覆盖偏低，补充更多专注与精力评分后再依据洞察调整长期节奏。'
+        description: '当前反馈覆盖偏低，补充更多专注与精力评分后再依据洞察调整长期节奏。',
+        kind: 'reflect',
+        suggestedWorkMinutes: 0
       };
     }
     if (topInterruption !== '暂无') {
       return {
         title: `优先处理“${topInterruption}”`,
-        description: '开始前用一分钟移除主要打断源，再进入下一轮专注。'
+        description: '开始前用一分钟移除主要打断源，再进入下一轮专注。',
+        kind: 'interrupt',
+        suggestedWorkMinutes: 0
       };
     }
     return {
       title: `把高价值任务放在${bestPeriod}`,
-      description: `你的有效专注主要集中在${bestPeriod}，可优先安排最重要且最难的步骤。`
+      description: `你的有效专注主要集中在${bestPeriod}，可优先安排最重要且最难的步骤。`,
+      kind: 'schedule',
+      suggestedWorkMinutes: 0
     };
   }
 }

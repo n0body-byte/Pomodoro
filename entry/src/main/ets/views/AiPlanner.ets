@@ -60,6 +60,8 @@ export struct AiPlanner {
   @State serviceMode: string = 'deepseek';
   @State apiKey: string = '';
   @State deepSeekModel: string = 'deepseek-v4-flash';
+  @State rememberApiKey: boolean = false;
+  @State lightConfirmEnabled: boolean = false;
   @State endpoint: string = '';
   @State goal: string = '';
   @State deadline: string = '';
@@ -175,12 +177,29 @@ export struct AiPlanner {
   async aboutToAppear(): Promise<void> {
     this.endpoint = await PreferencesHelper.loadAiServiceEndpoint(this.getContext());
     this.autoReviewEnabled = await PreferencesHelper.loadAiAutoReview(this.getContext());
+    this.rememberApiKey = await PreferencesHelper.loadAiRememberKey(this.getContext());
+    this.lightConfirmEnabled = await PreferencesHelper.loadAiLightConfirm(this.getContext());
+    this.deepSeekModel = await PreferencesHelper.loadAiModel(this.getContext());
+    if (this.rememberApiKey) {
+      this.apiKey = await PreferencesHelper.loadAiApiKey(this.getContext());
+    }
     await this.loadAgentState();
     await this.loadConversationHistory();
     await this.refreshAgentAnalysis();
     await this.tryAutoReview();
     this.onWearableAdjustmentChange();
     this.showServiceSettings = false;
+  }
+
+  private async persistServiceMemory(): Promise<void> {
+    await PreferencesHelper.saveAiRememberKey(this.getContext(), this.rememberApiKey);
+    await PreferencesHelper.saveAiModel(this.getContext(), this.deepSeekModel);
+    await PreferencesHelper.saveAiLightConfirm(this.getContext(), this.lightConfirmEnabled);
+    if (this.rememberApiKey) {
+      await PreferencesHelper.saveAiApiKey(this.getContext(), this.apiKey.trim());
+    } else {
+      await PreferencesHelper.saveAiApiKey(this.getContext(), '');
+    }
   }
 
   async onActiveChange(): Promise<void> {
@@ -391,6 +410,23 @@ export struct AiPlanner {
   }
 
   private stagePlanProposal(request: string, reply: string, plan: AiPlan, source: string): void {
+    if (this.lightConfirmEnabled &&
+      AiPlanProposalHelper.isMinorProposal(this.planSteps, plan.steps)) {
+      this.pendingPlanSummary = plan.summary;
+      this.pendingPlanSteps = plan.steps;
+      this.pendingPlanReply = reply;
+      this.pendingPlanRequest = request;
+      this.pendingPlanSource = source;
+      this.pendingPlanCreatedAt = Date.now();
+      this.pendingPrimaryGoal = this.proposalPrimaryGoalDraft;
+      this.proposalPrimaryGoalDraft = '';
+      this.pendingPlanSelections = this.createDefaultSelections(
+        Math.max(this.planSteps.length, plan.steps.length));
+      this.applyPendingPlan(true).then(() => {
+        this.successMessage = '小改动已自动应用（轻确认模式）';
+      });
+      return;
+    }
     this.pendingPlanSummary = plan.summary;
     this.pendingPlanSteps = plan.steps;
     this.pendingPlanReply = reply;
@@ -1983,6 +2019,7 @@ export struct AiPlanner {
               .borderRadius(17).onClick(() => {
                 this.deepSeekModel = 'deepseek-v4-flash';
                 this.serviceCheckMessage = '';
+                this.persistServiceMemory();
               })
             Text('V4 Pro · 复杂规划').layoutWeight(1).height(34).fontSize(11)
               .fontColor(this.deepSeekModel === 'deepseek-v4-pro' ? Color.Black :
@@ -1993,8 +2030,39 @@ export struct AiPlanner {
               .borderRadius(17).onClick(() => {
                 this.deepSeekModel = 'deepseek-v4-pro';
                 this.serviceCheckMessage = '';
+                this.persistServiceMemory();
               })
           }.width('100%')
+          Row({ space: 10 }) {
+            Column({ space: 3 }) {
+              Text('本机记住密钥').fontSize(12).fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.text_primary')).width('100%')
+              Text('仅存本机 Preferences，卸载即清除；共用设备请关闭')
+                .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+            }.layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.rememberApiKey })
+              .selectedColor($r('app.color.primary_green'))
+              .onChange((enabled: boolean) => {
+                this.rememberApiKey = enabled;
+                this.persistServiceMemory();
+              })
+          }
+          .width('100%').padding(11).backgroundColor($r('app.color.ring_track')).borderRadius(12)
+          Row({ space: 10 }) {
+            Column({ space: 3 }) {
+              Text('小改动轻确认').fontSize(12).fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.text_primary')).width('100%')
+              Text('仅备注/估时微调且番茄变化≤1 时自动应用，大改仍需确认')
+                .fontSize(9).fontColor($r('app.color.text_tertiary')).width('100%')
+            }.layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.lightConfirmEnabled })
+              .selectedColor($r('app.color.primary_green'))
+              .onChange((enabled: boolean) => {
+                this.lightConfirmEnabled = enabled;
+                this.persistServiceMemory();
+              })
+          }
+          .width('100%').padding(11).backgroundColor($r('app.color.ring_track')).borderRadius(12)
           Button(this.isCheckingService ? '正在诊断…' : '检查密钥、余额与模型')
             .width('100%').height(38).fontSize(11).enabled(!this.isCheckingService)
             .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.primary_green'))
@@ -2006,8 +2074,12 @@ export struct AiPlanner {
           }
           Text('诊断仅查询账户余额可用状态与模型列表，不发送目标或对话内容。')
             .width('100%').fontSize(9).fontColor($r('app.color.text_tertiary'))
-          Text('直连密钥可能被调试或逆向获取；退出 App 后需重新输入。')
-            .width('100%').fontSize(10).fontColor($r('app.color.primary_red'))
+          Text(this.rememberApiKey ?
+            '已开启本机记住密钥：仅保存在设备本地，不会进入对话历史或接续快照。' :
+            '默认不持久化密钥；退出 App 后需重新输入。共用设备请保持关闭。')
+            .width('100%').fontSize(10)
+            .fontColor(this.rememberApiKey ? $r('app.color.text_tertiary') :
+              $r('app.color.primary_red'))
         } else {
           TextInput({ text: this.endpoint, placeholder: 'https://你的域名/plan' })
             .width('100%').height(42).fontSize(13)
@@ -2018,13 +2090,14 @@ export struct AiPlanner {
             .backgroundColor($r('app.color.primary_red')).fontColor(Color.White).borderRadius(19)
             .onClick(() => this.saveEndpoint())
         }
-        Button('完成配置').width('100%').height(36).fontSize(12)
+          Button('完成配置').width('100%').height(36).fontSize(12)
           .backgroundColor($r('app.color.ring_track')).fontColor($r('app.color.text_secondary'))
           .borderRadius(18).onClick(() => {
             if (this.serviceMode === 'deepseek' && this.apiKey.trim().length < 10) {
               this.errorMessage = '请先填写 DeepSeek API Key';
               return;
             }
+            this.persistServiceMemory();
             this.showServiceSettings = false;
             this.errorMessage = '';
           })
