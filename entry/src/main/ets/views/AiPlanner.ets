@@ -1842,7 +1842,7 @@ export struct AiPlanner {
               Column({ space: 7 }) {
                 Text('还没有对话').fontSize(14).fontWeight(FontWeight.Medium)
                   .fontColor($r('app.color.text_primary'))
-                Text('创建计划或向智能体提问后，对话会自动保存在此列表中')
+                Text('在下方描述本轮目标与截止时间，生成可执行计划后对话会自动保存在此')
                   .fontSize(10).fontColor($r('app.color.text_tertiary')).textAlign(TextAlign.Center)
               }
               .width('100%').padding({ top: 28, bottom: 28, left: 18, right: 18 })

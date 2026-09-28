@@ -10,6 +10,7 @@ export struct Insights {
   @Prop canRepeatTask: boolean = true;
   onHistoryChanged?: () => void;
   onRepeatTask?: (record: SessionRecord) => void;
+  onGoTimer?: () => void;
 
   @Builder
   sectionButton(label: string, index: number) {
@@ -42,7 +43,14 @@ export struct Insights {
 
       Column() {
         if (this.selectedSection === 0) {
-          Statistics({ active: this.active })
+          Statistics({
+            active: this.active,
+            onGoTimer: () => {
+              if (this.onGoTimer !== undefined) {
+                this.onGoTimer();
+              }
+            }
+          })
         } else if (this.selectedSection === 1) {
           History({
             active: this.active,
@@ -56,10 +64,22 @@ export struct Insights {
               if (this.onRepeatTask !== undefined) {
                 this.onRepeatTask(record);
               }
+            },
+            onGoTimer: () => {
+              if (this.onGoTimer !== undefined) {
+                this.onGoTimer();
+              }
             }
           })
         } else {
-          Achievements({ active: this.active })
+          Achievements({
+            active: this.active,
+            onGoTimer: () => {
+              if (this.onGoTimer !== undefined) {
+                this.onGoTimer();
+              }
+            }
+          })
         }
       }
       .layoutWeight(1)

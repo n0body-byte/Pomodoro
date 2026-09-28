@@ -1,4 +1,5 @@
 import { PreferencesHelper } from '../utils/PreferencesHelper';
+import { ProductGuideHelper } from '../utils/ProductGuideHelper';
 import { DEFAULT_WORK_SECONDS, DEFAULT_BREAK_SECONDS, DEFAULT_DAILY_TARGET } from '../common/Constants';
 
 @Component
@@ -95,20 +96,14 @@ export struct Settings {
   }
 
   private selectPreset(name: string): void {
-    this.presetName = name;
-    if (name === 'classic') {
-      this.workMinutes = 25;
-      this.breakMinutes = 5;
-      this.longBreakMinutes = 15;
-    } else if (name === 'deep') {
-      this.workMinutes = 50;
-      this.breakMinutes = 10;
-      this.longBreakMinutes = 20;
-    } else if (name === 'quick') {
-      this.workMinutes = 15;
-      this.breakMinutes = 3;
-      this.longBreakMinutes = 10;
+    const preset = ProductGuideHelper.resolvePreset(name);
+    if (preset === null) {
+      return;
     }
+    this.presetName = preset.name;
+    this.workMinutes = preset.workMinutes;
+    this.breakMinutes = preset.breakMinutes;
+    this.longBreakMinutes = preset.longBreakMinutes;
   }
 
   private changeLongBreak(delta: number): void {
@@ -224,18 +219,63 @@ export struct Settings {
                 label: '深度 50/10', value: 'deep', current: this.presetName,
                 onSelect: (value: string) => this.selectPreset(value)
               }).layoutWeight(1)
+            }
+            .width('100%')
+            Row({ space: 8 }) {
               OptionChip({
                 label: '轻量 15/3', value: 'quick', current: this.presetName,
                 onSelect: (value: string) => this.selectPreset(value)
               }).layoutWeight(1)
+              OptionChip({
+                label: '演示 1/1', value: 'demo', current: this.presetName,
+                onSelect: (value: string) => this.selectPreset(value)
+              }).layoutWeight(1)
             }
             .width('100%')
+            if (this.presetName === 'demo') {
+              Text('演示预设：1 分钟专注 / 1 分钟休息，便于现场快速走完规划—执行—复盘闭环。保存后生效。')
+                .fontSize(10)
+                .lineHeight(15)
+                .fontColor($r('app.color.text_tertiary'))
+                .width('100%')
+            }
           }
           .width('100%')
           .padding(16)
           .backgroundColor($r('app.color.surface'))
           .border({ width: 1, color: $r('app.color.card_border') })
           .borderRadius(18)
+          .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
+
+          Column({ space: 12 }) {
+            Row({ space: 12 }) {
+              Stack({ alignContent: Alignment.Center }) {
+                Text('♥').fontSize(20).fontColor($r('app.color.primary_red'))
+              }
+              .width(46).height(46).borderRadius(23)
+              .backgroundColor($r('app.color.ring_track'))
+
+              Column({ space: 3 }) {
+                Text('穿戴协同实验室')
+                  .fontSize(17).fontWeight(FontWeight.Bold)
+                  .fontColor($r('app.color.text_primary')).width('100%')
+                Text('没有真机也能验证手表控制、心率规则与受控计划调整')
+                  .fontSize(10).lineHeight(15)
+                  .fontColor($r('app.color.text_tertiary')).width('100%')
+              }.layoutWeight(1)
+            }.width('100%')
+
+            Button('打开虚拟手表')
+              .width('100%').height(40).fontSize(12).fontWeight(FontWeight.Bold)
+              .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(20)
+              .onClick(() => {
+                if (this.onOpenWearableLab) {
+                  this.onOpenWearableLab();
+                }
+              })
+          }
+          .width('100%').padding(16).backgroundColor($r('app.color.surface'))
+          .border({ width: 1, color: $r('app.color.primary_green') }).borderRadius(18)
           .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
 
           Column() {
@@ -303,37 +343,6 @@ export struct Settings {
           .backgroundColor($r('app.color.surface'))
           .border({ width: 1, color: $r('app.color.card_border') })
           .borderRadius(18)
-          .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
-
-          Column({ space: 12 }) {
-            Row({ space: 12 }) {
-              Stack({ alignContent: Alignment.Center }) {
-                Text('♥').fontSize(20).fontColor($r('app.color.primary_red'))
-              }
-              .width(46).height(46).borderRadius(23)
-              .backgroundColor($r('app.color.ring_track'))
-
-              Column({ space: 3 }) {
-                Text('穿戴协同实验室')
-                  .fontSize(17).fontWeight(FontWeight.Bold)
-                  .fontColor($r('app.color.text_primary')).width('100%')
-                Text('没有真机也能验证手表控制、心率规则和 Agent 调整链路')
-                  .fontSize(10).lineHeight(15)
-                  .fontColor($r('app.color.text_tertiary')).width('100%')
-              }.layoutWeight(1)
-            }.width('100%')
-
-            Button('打开虚拟手表')
-              .width('100%').height(40).fontSize(12).fontWeight(FontWeight.Bold)
-              .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black).borderRadius(20)
-              .onClick(() => {
-                if (this.onOpenWearableLab) {
-                  this.onOpenWearableLab();
-                }
-              })
-          }
-          .width('100%').padding(16).backgroundColor($r('app.color.surface'))
-          .border({ width: 1, color: $r('app.color.card_border') }).borderRadius(18)
           .shadow({ radius: 6, color: $r('app.color.shadow_surface'), offsetY: 2 })
 
           Column({ space: 14 }) {

@@ -19,6 +19,7 @@ import {
   WearableRecoveryAction,
   WearableRecoveryResolution
 } from '../utils/WearableHealthHelper';
+import { ProductGuideHelper, ProductGuideStep } from '../utils/ProductGuideHelper';
 import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
@@ -86,6 +87,9 @@ struct Index {
   @State feedbackRecordCompletedAt: number = 0;
   @State feedbackDurationSeconds: number = 0;
   @State feedbackWasCompleted: boolean = true;
+  @State showProductGuide: boolean = false;
+  @State productGuideIndex: number = 0;
+  private productGuideSteps: ProductGuideStep[] = ProductGuideHelper.guideSteps();
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
@@ -125,6 +129,65 @@ struct Index {
     this.remainingSeconds = this.workDuration;
     this.totalSeconds = this.workDuration;
     this.updateProgress();
+    const guideDone = await PreferencesHelper.loadProductGuideDone(ctx);
+    this.showProductGuide = !guideDone;
+    this.productGuideIndex = 0;
+  }
+
+  private currentGuideStep(): ProductGuideStep {
+    const index = ProductGuideHelper.clampGuideIndex(
+      this.productGuideIndex, this.productGuideSteps.length);
+    return this.productGuideSteps[index];
+  }
+
+  private async finishProductGuide(): Promise<void> {
+    this.showProductGuide = false;
+    await PreferencesHelper.saveProductGuideDone(this.getContext(), true);
+  }
+
+  private async onGuidePrimary(): Promise<void> {
+    const step = this.currentGuideStep();
+    if (step.primaryAction === 'ai') {
+      await this.finishProductGuide();
+      this.currentTabIndex = 1;
+      this.tabsController.changeIndex(1);
+      return;
+    }
+    if (step.primaryAction === 'wearable') {
+      await this.finishProductGuide();
+      this.openWearableLab();
+      return;
+    }
+    if (step.primaryAction === 'next') {
+      this.productGuideIndex = ProductGuideHelper.clampGuideIndex(
+        this.productGuideIndex + 1, this.productGuideSteps.length);
+      return;
+    }
+    await this.finishProductGuide();
+  }
+
+  private async onGuideSecondary(): Promise<void> {
+    const step = this.currentGuideStep();
+    if (step.primaryAction === 'next' || step.secondaryLabel === '跳过引导') {
+      await this.finishProductGuide();
+      return;
+    }
+    if (step.secondaryLabel === '下一步') {
+      this.productGuideIndex = ProductGuideHelper.clampGuideIndex(
+        this.productGuideIndex + 1, this.productGuideSteps.length);
+      return;
+    }
+    await this.finishProductGuide();
+  }
+
+  private openAiPlannerTab(): void {
+    this.currentTabIndex = 1;
+    this.tabsController.changeIndex(1);
+  }
+
+  private openTimerTab(): void {
+    this.currentTabIndex = 0;
+    this.tabsController.changeIndex(0);
   }
 
   aboutToDisappear(): void {
@@ -1268,7 +1331,7 @@ struct Index {
                 .borderRadius(20).backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
                 .onClick(() => this.submitSessionFeedback())
             }.width('100%')
-            Text('反馈会写入本轮记录，帮助智能体根据真实状态调整后续计划。')
+            Text('反馈会写入本轮记录，帮助后续计划与行动洞察根据真实状态调整。')
               .fontSize(9).lineHeight(14).fontColor($r('app.color.text_tertiary')).width('100%')
           }
           .width('100%').padding(18).backgroundColor($r('app.color.surface')).borderRadius(22)
@@ -1421,6 +1484,35 @@ struct Index {
       .borderRadius(14)
       .border({ width: 1, color: $r('app.color.card_border') })
 
+      if (ProductGuideHelper.shouldShowStartPath(
+        this.currentTask.length === 0, this.showAiStepHandoff)) {
+        Column({ space: 8 }) {
+          Text(ProductGuideHelper.startPathTitle())
+            .fontSize(12).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          Text(ProductGuideHelper.startPathDescription())
+            .fontSize(10).lineHeight(15)
+            .fontColor($r('app.color.text_secondary')).width('100%')
+          Row({ space: 8 }) {
+            Button('用 AI 拆解目标')
+              .layoutWeight(1).height(34).fontSize(11).fontWeight(FontWeight.Bold)
+              .borderRadius(17).backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+              .onClick(() => this.openAiPlannerTab())
+            Button('手动添加')
+              .layoutWeight(1).height(34).fontSize(11).borderRadius(17)
+              .backgroundColor($r('app.color.ring_track'))
+              .fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.openTaskEditor())
+          }.width('100%')
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+        .margin({ top: 8 })
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(14)
+        .border({ width: 1, color: $r('app.color.primary_green') })
+      }
+
       if (this.showAiStepHandoff) {
         Row({ space: 10 }) {
           Column({ space: 3 }) {
@@ -1548,6 +1640,62 @@ struct Index {
     }
   }
 
+  @Builder
+  productGuideOverlay() {
+    if (this.showProductGuide && this.productGuideSteps.length > 0) {
+      Column() {
+        Column({ space: 14 }) {
+          Row() {
+            Text(`新手引导 ${this.productGuideIndex + 1}/${this.productGuideSteps.length}`)
+              .fontSize(10).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.primary_green'))
+              .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+              .backgroundColor($r('app.color.ring_track')).borderRadius(11)
+            Blank()
+            Text('应用创新 · 产品主路径')
+              .fontSize(9).fontColor($r('app.color.text_tertiary'))
+          }.width('100%')
+
+          Text(this.currentGuideStep().title)
+            .fontSize(20).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          Text(this.currentGuideStep().description)
+            .fontSize(13).lineHeight(20)
+            .fontColor($r('app.color.text_secondary')).width('100%')
+
+          Row({ space: 8 }) {
+            ForEach(this.productGuideSteps, (step: ProductGuideStep, index: number) => {
+              Column()
+                .layoutWeight(1)
+                .height(4)
+                .borderRadius(2)
+                .backgroundColor(index <= this.productGuideIndex ?
+                  $r('app.color.primary_green') : $r('app.color.ring_track'))
+            }, (step: ProductGuideStep) => step.id)
+          }.width('100%')
+
+          Row({ space: 10 }) {
+            Button(this.currentGuideStep().secondaryLabel)
+              .layoutWeight(1).height(42).fontSize(12).borderRadius(21)
+              .backgroundColor($r('app.color.ring_track'))
+              .fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.onGuideSecondary())
+            Button(this.currentGuideStep().primaryLabel)
+              .layoutWeight(1).height(42).fontSize(12).fontWeight(FontWeight.Bold)
+              .borderRadius(21).backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+              .onClick(() => this.onGuidePrimary())
+          }.width('100%')
+        }
+        .width('88%').padding(20)
+        .backgroundColor($r('app.color.surface')).borderRadius(22)
+        .border({ width: 1, color: $r('app.color.card_border') })
+      }
+      .width('100%').height('100%')
+      .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+      .backgroundColor('#99000000').zIndex(30)
+    }
+  }
+
   build() {
     Stack() {
     Tabs({ barPosition: BarPosition.End, controller: this.tabsController }) {
@@ -1588,7 +1736,8 @@ struct Index {
           canRepeatTask: TimerPlanHelper.canHandoffAiStep(
             this.isRunning, this.remainingSeconds, this.totalSeconds),
           onHistoryChanged: () => this.loadTodayStats(),
-          onRepeatTask: (record: SessionRecord) => this.repeatHistoryTask(record)
+          onRepeatTask: (record: SessionRecord) => this.repeatHistoryTask(record),
+          onGoTimer: () => this.openTimerTab()
         })
       }
       .tabBar(this.tabBarInsights)
@@ -1676,9 +1825,10 @@ struct Index {
           this.openAgentWithWearableSuggestion(request)
       })
     }
+    this.productGuideOverlay()
     }
-    .width('100%')
-    .height('100%')
+  .width('100%')
+  .height('100%')
   }
 }
 

@@ -25,6 +25,7 @@ export struct History {
   @Prop canRepeatTask: boolean = true;
   onChanged?: () => void;
   onRepeatTask?: (record: SessionRecord) => void;
+  onGoTimer?: () => void;
   private editOriginal: SessionRecord | null = null;
   private filterKeys: string[] = ['all', 'work', 'break', 'completed', 'partial', 'reviewed'];
   private filterLabels: string[] = ['全部', '专注', '休息', '已完成', '部分', '已复盘'];
@@ -376,12 +377,29 @@ export struct History {
       }
 
       if (this.records.length === 0 && !this.showEditor) {
-        Column({ space: 8 }) {
+        Column({ space: 10 }) {
           Text('还没有专注记录').fontSize(16).fontColor($r('app.color.text_secondary'))
-          Text('完成一次计时，或点击右上角手动补记')
+          Text('完成一次计时，或手动补记后，这里会形成可检索的执行轨迹')
             .fontSize(12).fontColor($r('app.color.text_tertiary'))
+            .textAlign(TextAlign.Center)
+          Row({ space: 8 }) {
+            Button('开始第一轮专注')
+              .height(34).fontSize(11).fontWeight(FontWeight.Bold).borderRadius(17)
+              .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+              .onClick(() => {
+                if (this.onGoTimer !== undefined) {
+                  this.onGoTimer();
+                }
+              })
+            Button('手动补记')
+              .height(34).fontSize(11).borderRadius(17)
+              .backgroundColor($r('app.color.ring_track'))
+              .fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.startAdd())
+          }
         }
-        .layoutWeight(1).justifyContent(FlexAlign.Center)
+        .layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+        .padding({ left: 24, right: 24 })
       } else if (this.getFilteredRecords().length === 0 && !this.showEditor) {
         Column({ space: 8 }) {
           Text('没有匹配的记录').fontSize(16).fontColor($r('app.color.text_secondary'))

@@ -17,6 +17,7 @@ export struct Statistics {
   @State maxSeconds: number = 0;
   @State sessionCount: number = 0;
   @State focusInsight: FocusActionInsight = FocusInsightHelper.empty();
+  onGoTimer?: () => void;
   private hostCtx: Context | null = null;
 
   async aboutToAppear(): Promise<void> {
@@ -292,6 +293,17 @@ export struct Statistics {
                 .fontColor($r('app.color.text_primary')).width('100%')
               Text(this.focusInsight.actionDescription).fontSize(10).lineHeight(15)
                 .fontColor($r('app.color.text_secondary')).width('100%')
+              if (!this.focusInsight.hasData) {
+                Button('去计时页开始')
+                  .height(32).fontSize(11).fontWeight(FontWeight.Bold).borderRadius(16)
+                  .margin({ top: 4 })
+                  .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+                  .onClick(() => {
+                    if (this.onGoTimer !== undefined) {
+                      this.onGoTimer();
+                    }
+                  })
+              }
             }
             .width('100%').padding(10).backgroundColor($r('app.color.ring_track')).borderRadius(10)
           }
@@ -301,11 +313,18 @@ export struct Statistics {
           Column() {
             if (this.sessionCount === 0) {
               Column({ space: 8 }) {
-                Text('📊').fontSize(40)
                 Text('暂无数据').fontSize(15).fontWeight(FontWeight.Medium)
                   .fontColor($r('app.color.text_secondary'))
                 Text('开始计时后，专注数据将在这里展示')
                   .fontSize(12).fontColor($r('app.color.text_tertiary'))
+                Button('开始第一轮专注')
+                  .height(34).fontSize(11).fontWeight(FontWeight.Bold).borderRadius(17)
+                  .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+                  .onClick(() => {
+                    if (this.onGoTimer !== undefined) {
+                      this.onGoTimer();
+                    }
+                  })
               }
               .width('100%').height(220).justifyContent(FlexAlign.Center)
               .alignItems(HorizontalAlign.Center)

@@ -18,6 +18,7 @@ import { AiRequestTraceHelper } from '../main/ets/utils/AiRequestTraceHelper';
 import { AiDeadlineHelper } from '../main/ets/utils/AiDeadlineHelper';
 import { AiTokenBudgetHelper } from '../main/ets/utils/AiTokenBudgetHelper';
 import { FocusInsightHelper, FocusInsightRecord } from '../main/ets/utils/FocusInsightHelper';
+import { ProductGuideHelper } from '../main/ets/utils/ProductGuideHelper';
 import {
   HeartRateSample,
   MockHeartRateProvider,
@@ -967,6 +968,34 @@ export default function localUnitTest() {
       const insight = FocusInsightHelper.analyze(records, 500);
       expect(insight.reflectionCoveragePercent).assertEqual(25);
       expect(insight.actionTitle).assertEqual('连续完成 3 次轻量复盘');
+    });
+
+    it('productGuideProvidesThreeSceneSteps', 0, () => {
+      const steps = ProductGuideHelper.guideSteps();
+      expect(steps.length).assertEqual(3);
+      expect(steps[0].primaryAction).assertEqual('next');
+      expect(steps[1].primaryAction).assertEqual('ai');
+      expect(steps[2].primaryAction).assertEqual('wearable');
+    });
+
+    it('productGuideResolvesDemoPresetForLiveReview', 0, () => {
+      const demo = ProductGuideHelper.resolvePreset('demo');
+      expect(demo !== null).assertTrue();
+      if (demo !== null) {
+        expect(demo.workMinutes).assertEqual(1);
+        expect(demo.breakMinutes).assertEqual(1);
+        expect(demo.longBreakMinutes).assertEqual(2);
+        expect(demo.label.indexOf('演示') >= 0).assertTrue();
+      }
+      expect(ProductGuideHelper.resolvePreset('unknown') === null).assertTrue();
+    });
+
+    it('productGuideStartPathOnlyWhenTaskEmpty', 0, () => {
+      expect(ProductGuideHelper.shouldShowStartPath(true, false)).assertTrue();
+      expect(ProductGuideHelper.shouldShowStartPath(false, false)).assertFalse();
+      expect(ProductGuideHelper.shouldShowStartPath(true, true)).assertFalse();
+      expect(ProductGuideHelper.clampGuideIndex(5, 3)).assertEqual(2);
+      expect(ProductGuideHelper.clampGuideIndex(-1, 3)).assertEqual(0);
     });
   });
 }

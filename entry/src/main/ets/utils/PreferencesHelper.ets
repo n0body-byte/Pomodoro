@@ -27,6 +27,7 @@ import {
   PREF_KEY_CONTINUATION_TRANSFER_ID,
   PREF_KEY_CONTINUATION_TRANSFERRED_AT,
   PREF_KEY_WEARABLE_BASELINE,
+  PREF_KEY_PRODUCT_GUIDE_DONE,
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET,
@@ -692,6 +693,21 @@ export class PreferencesHelper {
       return await prefs.get(PREF_KEY_TIMER_PRESET, 'classic') as string;
     } catch {
       return 'classic';
+    }
+  }
+
+  static async saveProductGuideDone(context: Context, done: boolean): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_PRODUCT_GUIDE_DONE, done);
+    await prefs.flush();
+  }
+
+  static async loadProductGuideDone(context: Context): Promise<boolean> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_PRODUCT_GUIDE_DONE, false) as boolean;
+    } catch {
+      return false;
     }
   }
 
