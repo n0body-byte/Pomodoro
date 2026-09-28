@@ -25,13 +25,21 @@ from reportlab.platypus import (
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "说明文档.md"
 OUTPUT = ROOT / "output" / "pdf" / "番茄钟项目说明文档.pdf"
-FONT_REGULAR = Path(r"C:\Windows\Fonts\msyh.ttc")
-FONT_BOLD = Path(r"C:\Windows\Fonts\msyhbd.ttc")
+
+FONT_CANDIDATES = [
+    (Path(r"C:\Windows\Fonts\msyh.ttc"), Path(r"C:\Windows\Fonts\msyhbd.ttc"), 0, 0),
+    (Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"), Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"), 0, 0),
+    (Path("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"), Path("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"), 0, 0),
+]
 
 
 def register_fonts() -> None:
-    pdfmetrics.registerFont(TTFont("YaHei", str(FONT_REGULAR), subfontIndex=0))
-    pdfmetrics.registerFont(TTFont("YaHeiBold", str(FONT_BOLD), subfontIndex=0))
+    for regular, bold, regular_index, bold_index in FONT_CANDIDATES:
+        if regular.exists() and bold.exists():
+            pdfmetrics.registerFont(TTFont("YaHei", str(regular), subfontIndex=regular_index))
+            pdfmetrics.registerFont(TTFont("YaHeiBold", str(bold), subfontIndex=bold_index))
+            return
+    raise FileNotFoundError("未找到可用的中文字体，请安装微软雅黑或文泉驿微米黑。")
 
 
 def inline_markup(value: str) -> str:
@@ -237,7 +245,7 @@ def main() -> None:
         topMargin=15 * mm, bottomMargin=19 * mm,
         title="番茄钟智能专注助手 - 项目说明文档",
         author="n0body-byte",
-        subject="HarmonyOS ArkTS 课程项目说明",
+        subject="HarmonyOS 应用创新作品说明",
     )
     document.build(parse_markdown(), onFirstPage=draw_page, onLaterPages=draw_page)
     print(OUTPUT)

@@ -116,4 +116,28 @@ export class AiPlanProposalHelper {
     }
     return total;
   }
+
+  static isMinorProposal(current: AiPlanStep[], candidate: AiPlanStep[]): boolean {
+    if (current.length === 0 || candidate.length === 0 || current.length !== candidate.length) {
+      return false;
+    }
+    const selections: boolean[] = [];
+    for (let index = 0; index < candidate.length; index++) {
+      selections.push(true);
+    }
+    const stats = AiPlanProposalHelper.getStats(current, candidate, selections);
+    if (stats.added > 0 || stats.removed > 0) {
+      return false;
+    }
+    if (Math.abs(stats.candidatePomodoros - stats.currentPomodoros) > 1) {
+      return false;
+    }
+    for (let index = 0; index < current.length; index++) {
+      if (current[index].title !== candidate[index].title ||
+        current[index].project !== candidate[index].project) {
+        return false;
+      }
+    }
+    return stats.modified > 0;
+  }
 }

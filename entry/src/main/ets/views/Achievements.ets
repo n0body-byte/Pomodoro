@@ -7,6 +7,7 @@ export struct Achievements {
   @State totalCount: number = 0;
   @State allBadges: AchievementDef[] = [];
   @State refreshKey: number = 0;
+  onGoTimer?: () => void;
 
   async aboutToAppear(): Promise<void> {
     await this.refresh();
@@ -66,6 +67,23 @@ export struct Achievements {
         .fontColor($r('app.color.text_primary'))
         .width('100%')
         .padding({ top: 8, bottom: 4, left: 8 })
+
+      if (this.unlockedCount === 0) {
+        Column({ space: 8 }) {
+          Text('完成第一轮专注即可开始解锁徽章')
+            .fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
+          Button('去计时页开始')
+            .height(32).fontSize(11).fontWeight(FontWeight.Bold).borderRadius(16)
+            .backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+            .onClick(() => {
+              if (this.onGoTimer !== undefined) {
+                this.onGoTimer();
+              }
+            })
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 8, bottom: 4 })
+      }
 
       // 进度概览
       Column({ space: 6 }) {

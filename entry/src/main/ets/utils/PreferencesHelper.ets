@@ -27,6 +27,14 @@ import {
   PREF_KEY_CONTINUATION_TRANSFER_ID,
   PREF_KEY_CONTINUATION_TRANSFERRED_AT,
   PREF_KEY_WEARABLE_BASELINE,
+  PREF_KEY_PRODUCT_GUIDE_DONE,
+  PREF_KEY_AI_REMEMBER_KEY,
+  PREF_KEY_AI_API_KEY,
+  PREF_KEY_AI_MODEL,
+  PREF_KEY_AI_LIGHT_CONFIRM,
+  PREF_KEY_LAST_FEEDBACK_FOCUS,
+  PREF_KEY_LAST_FEEDBACK_ENERGY,
+  PREF_KEY_LAST_FEEDBACK_INTERRUPTION,
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
   DEFAULT_DAILY_TARGET,
@@ -692,6 +700,117 @@ export class PreferencesHelper {
       return await prefs.get(PREF_KEY_TIMER_PRESET, 'classic') as string;
     } catch {
       return 'classic';
+    }
+  }
+
+  static async saveProductGuideDone(context: Context, done: boolean): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_PRODUCT_GUIDE_DONE, done);
+    await prefs.flush();
+  }
+
+  static async loadProductGuideDone(context: Context): Promise<boolean> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_PRODUCT_GUIDE_DONE, false) as boolean;
+    } catch {
+      return false;
+    }
+  }
+
+  static async saveAiRememberKey(context: Context, enabled: boolean): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AI_REMEMBER_KEY, enabled);
+    if (!enabled) {
+      await prefs.put(PREF_KEY_AI_API_KEY, '');
+    }
+    await prefs.flush();
+  }
+
+  static async loadAiRememberKey(context: Context): Promise<boolean> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_AI_REMEMBER_KEY, false) as boolean;
+    } catch {
+      return false;
+    }
+  }
+
+  static async saveAiApiKey(context: Context, apiKey: string): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AI_API_KEY, apiKey);
+    await prefs.flush();
+  }
+
+  static async loadAiApiKey(context: Context): Promise<string> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_AI_API_KEY, '') as string;
+    } catch {
+      return '';
+    }
+  }
+
+  static async saveAiModel(context: Context, model: string): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AI_MODEL, model);
+    await prefs.flush();
+  }
+
+  static async loadAiModel(context: Context): Promise<string> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_AI_MODEL, 'deepseek-v4-flash') as string;
+    } catch {
+      return 'deepseek-v4-flash';
+    }
+  }
+
+  static async saveAiLightConfirm(context: Context, enabled: boolean): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_AI_LIGHT_CONFIRM, enabled);
+    await prefs.flush();
+  }
+
+  static async loadAiLightConfirm(context: Context): Promise<boolean> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      return await prefs.get(PREF_KEY_AI_LIGHT_CONFIRM, false) as boolean;
+    } catch {
+      return false;
+    }
+  }
+
+  static async saveLastFeedbackLite(context: Context, focusRating: number, energyRating: number,
+    interruptionReason: string): Promise<void> {
+    const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+    await prefs.put(PREF_KEY_LAST_FEEDBACK_FOCUS, focusRating);
+    await prefs.put(PREF_KEY_LAST_FEEDBACK_ENERGY, energyRating);
+    await prefs.put(PREF_KEY_LAST_FEEDBACK_INTERRUPTION, interruptionReason);
+    await prefs.flush();
+  }
+
+  static async loadLastFeedbackLite(context: Context): Promise<SessionFeedback> {
+    try {
+      const prefs = await preferences.getPreferences(context, PREFERENCES_STORE_NAME);
+      const focus = await prefs.get(PREF_KEY_LAST_FEEDBACK_FOCUS, 3) as number;
+      const energy = await prefs.get(PREF_KEY_LAST_FEEDBACK_ENERGY, 3) as number;
+      const reason = await prefs.get(PREF_KEY_LAST_FEEDBACK_INTERRUPTION, '无') as string;
+      return {
+        focusRating: Math.max(1, Math.min(5, focus)),
+        energyRating: Math.max(1, Math.min(5, energy)),
+        interruptionReason: reason.length > 0 ? reason : '无',
+        outcomeNote: '',
+        reflectedAt: 0
+      };
+    } catch {
+      return {
+        focusRating: 3,
+        energyRating: 3,
+        interruptionReason: '无',
+        outcomeNote: '',
+        reflectedAt: 0
+      };
     }
   }
 

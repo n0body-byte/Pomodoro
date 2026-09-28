@@ -31,6 +31,14 @@ export const PREF_KEY_AI_AUTO_REVIEW = 'aiAutoReview';
 export const PREF_KEY_CONTINUATION_TRANSFER_ID = 'continuationTransferId';
 export const PREF_KEY_CONTINUATION_TRANSFERRED_AT = 'continuationTransferredAt';
 export const PREF_KEY_WEARABLE_BASELINE = 'wearableBaselineBpm';
+export const PREF_KEY_PRODUCT_GUIDE_DONE = 'productGuideDone';
+export const PREF_KEY_AI_REMEMBER_KEY = 'aiRememberApiKey';
+export const PREF_KEY_AI_API_KEY = 'aiApiKeyLocal';
+export const PREF_KEY_AI_MODEL = 'aiDeepSeekModel';
+export const PREF_KEY_AI_LIGHT_CONFIRM = 'aiLightConfirm';
+export const PREF_KEY_LAST_FEEDBACK_FOCUS = 'lastFeedbackFocus';
+export const PREF_KEY_LAST_FEEDBACK_ENERGY = 'lastFeedbackEnergy';
+export const PREF_KEY_LAST_FEEDBACK_INTERRUPTION = 'lastFeedbackInterruption';
 
 export const DEFAULT_LONG_BREAK_SECONDS = 15 * 60;
 export const DEFAULT_LONG_BREAK_INTERVAL = 4;
