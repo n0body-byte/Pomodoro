@@ -19,6 +19,8 @@ import {
   WearableRecoveryAction,
   WearableRecoveryResolution
 } from '../utils/WearableHealthHelper';
+import { ProductGuideHelper, ProductGuideStep } from '../utils/ProductGuideHelper';
+import { FocusHabitHelper, RecentTaskItem } from '../utils/FocusHabitHelper';
 import {
   DEFAULT_WORK_SECONDS,
   DEFAULT_BREAK_SECONDS,
@@ -86,6 +88,12 @@ struct Index {
   @State feedbackRecordCompletedAt: number = 0;
   @State feedbackDurationSeconds: number = 0;
   @State feedbackWasCompleted: boolean = true;
+  @State showProductGuide: boolean = false;
+  @State productGuideIndex: number = 0;
+  @State recentTasks: RecentTaskItem[] = [];
+  @State streakDays: number = 0;
+  @State restTip: string = FocusHabitHelper.restTip(0);
+  private productGuideSteps: ProductGuideStep[] = ProductGuideHelper.guideSteps();
 
   private timerId: number | null = null;
   private workDuration: number = DEFAULT_WORK_SECONDS;
@@ -125,6 +133,65 @@ struct Index {
     this.remainingSeconds = this.workDuration;
     this.totalSeconds = this.workDuration;
     this.updateProgress();
+    const guideDone = await PreferencesHelper.loadProductGuideDone(ctx);
+    this.showProductGuide = !guideDone;
+    this.productGuideIndex = 0;
+  }
+
+  private currentGuideStep(): ProductGuideStep {
+    const index = ProductGuideHelper.clampGuideIndex(
+      this.productGuideIndex, this.productGuideSteps.length);
+    return this.productGuideSteps[index];
+  }
+
+  private async finishProductGuide(): Promise<void> {
+    this.showProductGuide = false;
+    await PreferencesHelper.saveProductGuideDone(this.getContext(), true);
+  }
+
+  private async onGuidePrimary(): Promise<void> {
+    const step = this.currentGuideStep();
+    if (step.primaryAction === 'ai') {
+      await this.finishProductGuide();
+      this.currentTabIndex = 1;
+      this.tabsController.changeIndex(1);
+      return;
+    }
+    if (step.primaryAction === 'wearable') {
+      await this.finishProductGuide();
+      this.openWearableLab();
+      return;
+    }
+    if (step.primaryAction === 'next') {
+      this.productGuideIndex = ProductGuideHelper.clampGuideIndex(
+        this.productGuideIndex + 1, this.productGuideSteps.length);
+      return;
+    }
+    await this.finishProductGuide();
+  }
+
+  private async onGuideSecondary(): Promise<void> {
+    const step = this.currentGuideStep();
+    if (step.primaryAction === 'next' || step.secondaryLabel === '跳过引导') {
+      await this.finishProductGuide();
+      return;
+    }
+    if (step.secondaryLabel === '下一步') {
+      this.productGuideIndex = ProductGuideHelper.clampGuideIndex(
+        this.productGuideIndex + 1, this.productGuideSteps.length);
+      return;
+    }
+    await this.finishProductGuide();
+  }
+
+  private openAiPlannerTab(): void {
+    this.currentTabIndex = 1;
+    this.tabsController.changeIndex(1);
+  }
+
+  private openTimerTab(): void {
+    this.currentTabIndex = 0;
+    this.tabsController.changeIndex(0);
   }
 
   aboutToDisappear(): void {
@@ -514,6 +581,7 @@ struct Index {
   }
 
   async loadTodayStats(): Promise<void> {
+    await this.refreshHabitSummary();
     try {
       this.todayCount = await PreferencesHelper.getTodaySessions(this.getContext());
       this.todayWorkSeconds = await PreferencesHelper.getTodayWorkSeconds(this.getContext());
@@ -710,6 +778,11 @@ struct Index {
     this.feedbackInterruptionReason = '无';
     this.feedbackOutcomeDraft = '';
     this.showSessionFeedback = true;
+    PreferencesHelper.loadLastFeedbackLite(this.getContext()).then((last) => {
+      this.feedbackFocusRating = last.focusRating;
+      this.feedbackEnergyRating = last.energyRating;
+      this.feedbackInterruptionReason = last.interruptionReason;
+    });
   }
 
   private continueAfterSessionFeedback(): void {
@@ -735,8 +808,61 @@ struct Index {
     try {
       await PreferencesHelper.saveSessionFeedback(
         this.getContext(), this.feedbackRecordCompletedAt, feedback);
+      await PreferencesHelper.saveLastFeedbackLite(this.getContext(), feedback.focusRating,
+        feedback.energyRating, feedback.interruptionReason);
     } finally {
       this.continueAfterSessionFeedback();
+    }
+  }
+
+  private async reuseLastFeedbackQuickSave(): Promise<void> {
+    const last = await PreferencesHelper.loadLastFeedbackLite(this.getContext());
+    this.feedbackFocusRating = last.focusRating;
+    this.feedbackEnergyRating = last.energyRating;
+    this.feedbackInterruptionReason = last.interruptionReason;
+    await this.submitSessionFeedback();
+  }
+
+  private applyRecentTask(item: RecentTaskItem): void {
+    if (!TimerPlanHelper.canHandoffAiStep(this.isRunning, this.remainingSeconds, this.totalSeconds)) {
+      return;
+    }
+    this.currentTask = item.task;
+    this.currentProject = item.project;
+    this.currentTag = item.tag;
+    this.currentNote = item.note;
+    this.estimatedPomodoros = Math.max(1, item.estimatedPomodoros);
+    this.currentTaskCompleted = 0;
+    this.currentTaskSource = 'manual';
+    this.currentTaskConversationId = '';
+    this.taskTrackingStartedAt = Date.now();
+    this.saveTaskContext();
+  }
+
+  private async applySuggestedWorkMinutes(minutes: number): Promise<void> {
+    const normalized = Math.max(1, Math.min(60, Math.round(minutes)));
+    if (!TimerPlanHelper.canHandoffAiStep(this.isRunning, this.remainingSeconds, this.totalSeconds)) {
+      this.openTimerTab();
+      return;
+    }
+    await PreferencesHelper.saveWorkDuration(this.getContext(), normalized * 60);
+    await PreferencesHelper.saveTimerPreset(this.getContext(), 'custom');
+    await this.loadSettings();
+    this.totalSeconds = this.workDuration;
+    this.remainingSeconds = this.workDuration;
+    this.updateProgress();
+    this.openTimerTab();
+  }
+
+  private async refreshHabitSummary(): Promise<void> {
+    try {
+      const history = await PreferencesHelper.loadSessionHistory(this.getContext());
+      this.recentTasks = FocusHabitHelper.buildRecentTasks(history, 3);
+      this.streakDays = FocusHabitHelper.computeCurrentStreak(history);
+      this.restTip = FocusHabitHelper.restTip(this.completedSessions);
+    } catch {
+      this.recentTasks = [];
+      this.streakDays = 0;
     }
   }
 
@@ -1268,7 +1394,12 @@ struct Index {
                 .borderRadius(20).backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
                 .onClick(() => this.submitSessionFeedback())
             }.width('100%')
-            Text('反馈会写入本轮记录，帮助智能体根据真实状态调整后续计划。')
+            Button('沿用上次评分并保存')
+              .width('100%').height(36).fontSize(11).borderRadius(18)
+              .backgroundColor($r('app.color.ring_track'))
+              .fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.reuseLastFeedbackQuickSave())
+            Text('反馈会写入本轮记录；连续多轮时可一键沿用上次评分，减少打断。')
               .fontSize(9).lineHeight(14).fontColor($r('app.color.text_tertiary')).width('100%')
           }
           .width('100%').padding(18).backgroundColor($r('app.color.surface')).borderRadius(22)
@@ -1384,6 +1515,13 @@ struct Index {
         }
         .width('100%')
         .justifyContent(FlexAlign.SpaceBetween)
+
+        Text(this.streakDays > 0 ?
+          `连续 ${this.streakDays} 天 · 今日还差 ${FocusHabitHelper.remainingToTarget(this.todayCount, this.dailyTarget)} 个` :
+          `今日还差 ${FocusHabitHelper.remainingToTarget(this.todayCount, this.dailyTarget)} 个番茄达成目标`)
+          .fontSize(10)
+          .fontColor($r('app.color.text_tertiary'))
+          .width('100%')
       }
       .width('100%')
       .padding({ left: 18, right: 18, top: 14, bottom: 14 })
@@ -1420,6 +1558,68 @@ struct Index {
       .backgroundColor($r('app.color.surface'))
       .borderRadius(14)
       .border({ width: 1, color: $r('app.color.card_border') })
+
+      if (ProductGuideHelper.shouldShowStartPath(
+        this.currentTask.length === 0, this.showAiStepHandoff)) {
+        Column({ space: 8 }) {
+          Text(ProductGuideHelper.startPathTitle())
+            .fontSize(12).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          Text(ProductGuideHelper.startPathDescription())
+            .fontSize(10).lineHeight(15)
+            .fontColor($r('app.color.text_secondary')).width('100%')
+          Row({ space: 8 }) {
+            Button('用 AI 拆解目标')
+              .layoutWeight(1).height(34).fontSize(11).fontWeight(FontWeight.Bold)
+              .borderRadius(17).backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+              .onClick(() => this.openAiPlannerTab())
+            Button('手动添加')
+              .layoutWeight(1).height(34).fontSize(11).borderRadius(17)
+              .backgroundColor($r('app.color.ring_track'))
+              .fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.openTaskEditor())
+          }.width('100%')
+          if (this.recentTasks.length > 0) {
+            Text('最近任务，点按续摊')
+              .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
+            Scroll() {
+              Row({ space: 8 }) {
+                ForEach(this.recentTasks, (item: RecentTaskItem) => {
+                  Button(item.task)
+                    .height(30).fontSize(10).borderRadius(15)
+                    .constraintSize({ maxWidth: 160 })
+                    .backgroundColor($r('app.color.ring_track'))
+                    .fontColor($r('app.color.text_secondary'))
+                    .onClick(() => this.applyRecentTask(item))
+                }, (item: RecentTaskItem) => `${item.task}-${item.project}`)
+              }
+            }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
+          }
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+        .margin({ top: 8 })
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(14)
+        .border({ width: 1, color: $r('app.color.primary_green') })
+      } else if (this.currentTask.length === 0 && this.recentTasks.length > 0 &&
+        !this.showAiStepHandoff) {
+        Scroll() {
+          Row({ space: 8 }) {
+            Text('续摊').fontSize(10).fontColor($r('app.color.text_tertiary'))
+            ForEach(this.recentTasks, (item: RecentTaskItem) => {
+              Button(item.task)
+                .height(28).fontSize(10).borderRadius(14)
+                .constraintSize({ maxWidth: 140 })
+                .backgroundColor($r('app.color.ring_track'))
+                .fontColor($r('app.color.text_secondary'))
+                .onClick(() => this.applyRecentTask(item))
+            }, (item: RecentTaskItem) => `recent-${item.task}-${item.project}`)
+          }
+        }
+        .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+        .width('100%').margin({ top: 8 })
+      }
 
       if (this.showAiStepHandoff) {
         Row({ space: 10 }) {
@@ -1477,6 +1677,15 @@ struct Index {
           onSkip: () => this.onSkipPhase()
         })
           .margin({ top: 28 })
+
+        if (!this.isWorkMode) {
+          Text(this.restTip)
+            .fontSize(11).lineHeight(16)
+            .fontColor($r('app.color.text_secondary'))
+            .textAlign(TextAlign.Center)
+            .margin({ top: 14 })
+            .padding({ left: 12, right: 12 })
+        }
       }
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
@@ -1548,6 +1757,62 @@ struct Index {
     }
   }
 
+  @Builder
+  productGuideOverlay() {
+    if (this.showProductGuide && this.productGuideSteps.length > 0) {
+      Column() {
+        Column({ space: 14 }) {
+          Row() {
+            Text(`新手引导 ${this.productGuideIndex + 1}/${this.productGuideSteps.length}`)
+              .fontSize(10).fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.primary_green'))
+              .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+              .backgroundColor($r('app.color.ring_track')).borderRadius(11)
+            Blank()
+            Text('应用创新 · 产品主路径')
+              .fontSize(9).fontColor($r('app.color.text_tertiary'))
+          }.width('100%')
+
+          Text(this.currentGuideStep().title)
+            .fontSize(20).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).width('100%')
+          Text(this.currentGuideStep().description)
+            .fontSize(13).lineHeight(20)
+            .fontColor($r('app.color.text_secondary')).width('100%')
+
+          Row({ space: 8 }) {
+            ForEach(this.productGuideSteps, (step: ProductGuideStep, index: number) => {
+              Column()
+                .layoutWeight(1)
+                .height(4)
+                .borderRadius(2)
+                .backgroundColor(index <= this.productGuideIndex ?
+                  $r('app.color.primary_green') : $r('app.color.ring_track'))
+            }, (step: ProductGuideStep) => step.id)
+          }.width('100%')
+
+          Row({ space: 10 }) {
+            Button(this.currentGuideStep().secondaryLabel)
+              .layoutWeight(1).height(42).fontSize(12).borderRadius(21)
+              .backgroundColor($r('app.color.ring_track'))
+              .fontColor($r('app.color.text_secondary'))
+              .onClick(() => this.onGuideSecondary())
+            Button(this.currentGuideStep().primaryLabel)
+              .layoutWeight(1).height(42).fontSize(12).fontWeight(FontWeight.Bold)
+              .borderRadius(21).backgroundColor($r('app.color.primary_green')).fontColor(Color.Black)
+              .onClick(() => this.onGuidePrimary())
+          }.width('100%')
+        }
+        .width('88%').padding(20)
+        .backgroundColor($r('app.color.surface')).borderRadius(22)
+        .border({ width: 1, color: $r('app.color.card_border') })
+      }
+      .width('100%').height('100%')
+      .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+      .backgroundColor('#99000000').zIndex(30)
+    }
+  }
+
   build() {
     Stack() {
     Tabs({ barPosition: BarPosition.End, controller: this.tabsController }) {
@@ -1588,7 +1853,9 @@ struct Index {
           canRepeatTask: TimerPlanHelper.canHandoffAiStep(
             this.isRunning, this.remainingSeconds, this.totalSeconds),
           onHistoryChanged: () => this.loadTodayStats(),
-          onRepeatTask: (record: SessionRecord) => this.repeatHistoryTask(record)
+          onRepeatTask: (record: SessionRecord) => this.repeatHistoryTask(record),
+          onGoTimer: () => this.openTimerTab(),
+          onApplyWorkMinutes: (minutes: number) => this.applySuggestedWorkMinutes(minutes)
         })
       }
       .tabBar(this.tabBarInsights)
@@ -1676,9 +1943,10 @@ struct Index {
           this.openAgentWithWearableSuggestion(request)
       })
     }
+    this.productGuideOverlay()
     }
-    .width('100%')
-    .height('100%')
+  .width('100%')
+  .height('100%')
   }
 }
 
