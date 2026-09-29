@@ -247,6 +247,7 @@ entry/src/main/ets/
 
 - [完整项目说明](说明文档.md)
 - [PDF 版项目说明](output/pdf/番茄钟项目说明文档.pdf)
+- [复赛官方模板对稿（作品说明文档）](docs/submission/README.md)
 - [AI 代理说明](ai-proxy/README.md)
 - [跨设备接续说明](docs/CROSS_DEVICE_CONTINUATION.md)
 - [穿戴协同原型说明](docs/WEARABLE_PROTOTYPE.md)
